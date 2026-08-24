@@ -1,0 +1,12 @@
+[
+  {"player_id":"4046","team":"CIN","stats":{"gp":17,"pass_att":0,"rec_tgt":175,"rec":118,"rec_yd":1650,"rec_td":13,"rec_fd":71,"rush_att":3,"rush_yd":15,"rush_td":0,"rush_fd":1,"fum_lost":1.1,"rec_2pt":0.3,"pts_ppr":340.2,"bonus_rec_yd_100":8.1},
+   "player":{"first_name":"Ja'Marr","last_name":"Chase","full_name":"Ja'Marr Chase","position":"WR","team":"CIN","fantasy_positions":["WR"]}},
+  {"player_id":"6797","team":"LV","stats":{"gp":17,"rec_tgt":145,"rec":105,"rec_yd":1200,"rec_td":8,"rec_fd":55,"fum_lost":0.5,"pts_ppr":268.0},
+   "player":{"first_name":"Brock","last_name":"Bowers","full_name":"Brock Bowers","position":"TE","team":"LV","fantasy_positions":["TE"]}},
+  {"player_id":"6770","team":"BAL","stats":{"gp":16,"pass_att":480,"pass_cmp":315,"pass_yd":3900,"pass_td":32,"pass_int":7,"rush_att":140,"rush_yd":800,"rush_td":5,"rush_fd":48,"fum_lost":2.0,"pass_2pt":0.4,"rush_2pt":0.2,"pts_ppr":401.5},
+   "player":{"first_name":"Lamar","last_name":"Jackson","full_name":"Lamar Jackson","position":"QB","team":"BAL","fantasy_positions":["QB"]}},
+  {"player_id":"9999","team":"ATL","stats":{"gp":17,"rush_att":300,"rush_yd":1450,"rush_td":11,"rec_tgt":85,"rec":68,"rec_yd":570,"rec_td":3},
+   "player":{"first_name":"Bijan","last_name":"Robinson","full_name":"Bijan Robinson","position":"RB","team":"ATL","fantasy_positions":["RB"]}},
+  {"player_id":"1111","team":"NYJ","stats":{"gp":17,"def_int":3},
+   "player":{"first_name":"Some","last_name":"Linebacker","full_name":"Some Linebacker","position":"LB","team":"NYJ","fantasy_positions":["LB"]}}
+]

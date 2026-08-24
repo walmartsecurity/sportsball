@@ -83,6 +83,49 @@ in 2025; a human would bounce him back and the model will not. Bundled
 projections are a starting point — regenerate before you draft, and override
 with better numbers where you have them.
 
+## Using Sleeper's projections instead
+
+Sleeper projects stat lines, which is what this tool wants — their fantasy
+totals are computed under their own scoring, and SFB16 is nothing like it. The
+importer takes the stats and lets this engine apply SFB16 rules to them:
+
+```
+python tools/fetch_sleeper.py --season 2026 --out sleeper.csv
+python tools/build_app.py --projections sleeper.csv --out app.html
+```
+
+If your network blocks the API, fetch it yourself and parse the saved payload —
+same result:
+
+```
+curl -sS 'https://api.sleeper.com/projections/nfl/2026?season_type=regular\
+&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr' > sleeper.json
+python tools/fetch_sleeper.py --from-json sleeper.json --out sleeper.csv
+```
+
+**Taken:** volume, yardage, touchdowns, interceptions, fumbles, two-point
+conversions, and — when Sleeper projects them — rushing and receiving first
+downs, which SFB16 scores and almost nobody publishes.
+
+**Deliberately not taken:** Sleeper's own `bonus_*` projections. They are
+computed for Sleeper's thresholds, which do not match SFB16's — Sleeper splits
+rushing and receiving hundred-yard bonuses where SFB16 pays on the combined
+scrimmage total, and Sleeper has no 20-yard-reception bonus at all. Using them
+would silently mis-score the format, so the video game bonuses stay with this
+tool's fitted models.
+
+Sleeper's API is undocumented and its field names have changed before, so the
+mapping is tolerant of aliases and `--inspect` prints exactly what came back and
+how each field resolved:
+
+```
+python tools/fetch_sleeper.py --season 2026 --inspect
+```
+
+The parser is tested against recorded payloads rather than the live service, so
+a silent shape change shows up as missing fields in `--inspect` rather than a
+plausible-looking board built on zeros.
+
 ## Why SFB16 needs its own model
 
 Most auction tools assume a conventional league: fixed starting slots, one
@@ -509,7 +552,7 @@ pip install -e '.[dev]'
 pytest
 ```
 
-170 tests covering scoring against hand-computed totals, the lognormal bonus
+189 tests covering scoring against hand-computed totals, the lognormal bonus
 model, exact lineup assignment, replacement derivation, the money identity,
 budget discipline, max-bid economics, draft bookkeeping, and every CLI command.
 The fitting pipeline lives in `tools/fit_bonus_rates.py` and is rerun offline,
@@ -532,6 +575,7 @@ Layout:
 | `cli.py` | the commands |
 | `tools/fit_bonus_rates.py` | fits the constants from nflverse play-by-play |
 | `tools/project_from_nflverse.py` | builds projections from play-by-play history |
+| `tools/fetch_sleeper.py` | imports Sleeper's projected stat lines |
 | `tools/make_sample.py` | regenerates a synthetic board with no real names |
 | `tools/build_app.py` | builds the standalone draft-room web app |
 | `tools/app_template.html` | the app's markup, styles and browser engine |
