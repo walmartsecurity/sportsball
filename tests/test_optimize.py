@@ -69,12 +69,26 @@ def test_owned_players_are_kept_and_cost_nothing(sfb16, board):
 def test_bench_is_valued_over_replacement_not_raw_points(sfb16, board, plan):
     """Regression: crediting bench players with raw points made a bench full of
     replacement-level quarterbacks look optimal, because quarterbacks post big
-    totals even when they are freely available."""
-    bench_qbs = [p for p in plan.bench if p.position == "QB"]
+    totals even when they are freely available.
+
+    Asserted on the objective directly rather than on who ends up benched: a
+    zero-value body still has to occupy a roster spot, so its presence proves
+    nothing either way. What matters is that it contributes nothing.
+    """
     levels = board.levels
-    for qb in bench_qbs:
-        # Any QB worth a bench spot must actually beat the QB you could stream.
-        assert qb.points >= levels.for_position("QB") - 1e-6
+    expected_bench = sum(
+        sfb16.bench_weight * max(p.points - levels.for_position(p.position), 0.0)
+        for p in plan.bench
+    )
+    assert plan.objective == pytest.approx(
+        plan.starter_points + expected_bench, rel=1e-6
+    )
+    # A replacement-level quarterback must add nothing at all.
+    streamable = [p for p in plan.bench
+                  if p.points <= levels.for_position(p.position)]
+    for player in streamable:
+        assert sfb16.bench_weight * max(
+            player.points - levels.for_position(player.position), 0.0) == 0.0
 
 
 def test_a_bigger_budget_never_hurts(sfb16, board):

@@ -16,7 +16,7 @@ from typing import Iterable, Iterator, Mapping, Sequence
 
 from .config import POSITIONS, ConfigError
 
-_SAMPLE = Path(__file__).parent / "data" / "sample_projections.csv"
+_DEFAULT = Path(__file__).parent / "data" / "projections_2026.csv"
 
 
 class ProjectionError(ValueError):
@@ -230,13 +230,24 @@ def _reject_duplicates(players: Sequence[Player]) -> None:
 def load_projections(
     source: str | Path | None = None, *, default_games: float = 17.0
 ) -> list[Player]:
-    """Load projections from ``source``, or the bundled sample when omitted."""
-    path = Path(source) if source is not None else _SAMPLE
+    """Load projections from ``source``, or the bundled set when omitted.
+
+    The bundled projections are built from nflverse history by
+    ``tools/project_from_nflverse.py``; see its docstring for the model and its
+    backtest. They know nothing about camp news or depth-chart moves that
+    happened after they were generated, so regenerate before you draft.
+    """
+    path = Path(source) if source is not None else _DEFAULT
     if not path.exists():
         raise ProjectionError(f"no projections file at {path}")
     with path.open(newline="") as handle:
         return parse_projections(handle, default_games=default_games)
 
 
-def sample_path() -> Path:
-    return _SAMPLE
+def default_projections_path() -> Path:
+    """Where the bundled projections live."""
+    return _DEFAULT
+
+
+# Kept for callers that predate the rename.
+sample_path = default_projections_path

@@ -5,7 +5,8 @@ command line entry point.
 """
 
 from .config import LeagueConfig, LineupSlot, ScoringRules, BonusRules
-from .players import Player, StatLine, load_projections
+from .players import (Player, StatLine, default_projections_path,
+                      load_projections)
 from .scoring import score_player, score_all
 from .valuation import Valuation, value_players
 from .optimize import optimize_roster, RosterPlan
@@ -19,6 +20,7 @@ __all__ = [
     "Player",
     "StatLine",
     "load_projections",
+    "default_projections_path",
     "score_player",
     "score_all",
     "Valuation",

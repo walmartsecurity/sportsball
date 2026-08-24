@@ -19,7 +19,8 @@ from typing import Iterable, Sequence
 from .config import ConfigError, LeagueConfig, bundled_leagues, load_league
 from .draft import DraftError, DraftState
 from .optimize import optimize_roster
-from .players import ProjectionError, load_projections, sample_path
+from .players import (ProjectionError, default_projections_path,
+                      load_projections)
 from .scoring import score_all, upside_points
 from .valuation import Valuation, ValuationBoard, value_players
 
@@ -119,7 +120,7 @@ def cmd_leagues(args: argparse.Namespace) -> int:
     for name in bundled_leagues():
         league = load_league(name)
         print(f"  {name:12s} {league.name}")
-    print(f"\nSample projections: {sample_path()}")
+    print(f"\nBundled projections: {default_projections_path()}")
     return 0
 
 
@@ -545,7 +546,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--projections", "-p", default=None,
-        help="projections CSV (default: the bundled sample)",
+        help="projections CSV (default: the bundled nflverse-based set)",
     )
     parser.add_argument("--teams", type=int, default=None, help="override team count")
     parser.add_argument("--budget", type=int, default=None, help="override budget")
