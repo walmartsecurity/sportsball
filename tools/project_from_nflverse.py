@@ -660,6 +660,94 @@ def backtest(cache: Path, seasons: list[int], games: float) -> None:
             print(f"{target:<8d}{label:18s}{rho:10.3f}{mae:8.1f}{trho:12.3f}")
 
 
+def calibrate(cache: Path, season: int, games: float) -> None:
+    """Do the projections imply a realistic number of big plays?
+
+    SFB16 pays ten points per explosive play, so a projection that is right
+    about yardage and wrong about how that yardage arrives will misprice the
+    board. This projects a past season, then compares expected big plays
+    against what those *same players* actually did -- same-player rather than
+    top-N against top-N, because comparing the best projections to the best
+    outcomes flatters or punishes a model for selection rather than accuracy.
+    Actuals are paced to the projected number of games so the two are
+    comparable.
+    """
+    from sportsball.config import load_league
+    from sportsball.players import Player, StatLine
+    from sportsball.scoring import score_player
+
+    league = load_league("sfb16")
+    points = league.bonuses.points
+    stats = seasonal_stats(cache)
+    proj = apply_age(project_veterans(stats[stats.season < season], season, games),
+                     season, cache)
+
+    pbp = pd.concat([
+        pd.read_parquet(f, columns=PBP_COLS)
+        for f in sorted(glob.glob(str(cache / "pbp_*.parquet")))
+    ])
+    pbp = pbp[(pbp.season_type == "REG") & (pbp.season == season)]
+    if pbp.empty:
+        print(f"no play-by-play for {season}; try an earlier --season")
+        return
+
+    def actual(idcol, mask, ycol, threshold):
+        d = pbp[mask].copy()
+        d['big'] = (d[ycol] >= threshold).astype(int)
+        return d.groupby(idcol).big.sum()
+
+    big = {
+        'rec_20_plays': actual('receiver_player_id',
+                               pbp.complete_pass.eq(1) & pbp.receiver_player_id.notna(),
+                               'receiving_yards', 20),
+        'rush_40_plays': actual('rusher_player_id',
+                                pbp.rush_attempt.eq(1) & pbp.rusher_player_id.notna(),
+                                'rushing_yards', 40),
+        'pass_40_plays': actual('passer_player_id',
+                                pbp.pass_attempt.eq(1) & pbp.passer_player_id.notna(),
+                                'passing_yards', 40),
+    }
+    played = stats[stats.season == season].set_index('pid').games.to_dict()
+
+    rows = []
+    for row in proj.itertuples():
+        gp = played.get(row.pid)
+        if not gp or gp < 8:
+            continue
+        line = StatLine(games=games, pass_att=row.pass_att, pass_yds=row.pass_yds,
+                        pass_td=row.pass_td, rush_att=row.rush_att,
+                        rush_yds=row.rush_yds, rush_td=row.rush_td,
+                        targets=row.targets, receptions=row.receptions,
+                        rec_yds=row.rec_yds, rec_td=row.rec_td)
+        scored = score_player(Player(name="x", position=row.position, stats=line),
+                              league)
+        pace = games / gp
+        entry = {'position': row.position}
+        for key, series in big.items():
+            entry[f"proj_{key}"] = scored.bonus_breakdown.get(key, 0.0) / points
+            entry[f"act_{key}"] = float(series.get(row.pid, 0)) * pace
+        rows.append(entry)
+
+    df = pd.DataFrame(rows)
+    print(f"\nBIG PLAY CALIBRATION \u2014 {season} projected from the seasons before it")
+    print(f"({len(df)} players with 8+ games; actuals paced to {games:.0f} games)\n")
+    print(f"  {'bonus':22s}{'pos':6s}{'actual':>10s}{'projected':>12s}{'ratio':>8s}")
+    families = (("20+ yard receptions", 'rec_20_plays', ['WR', 'TE', 'RB']),
+                ("40+ yard runs", 'rush_40_plays', ['RB', 'QB']),
+                ("40+ yard pass plays", 'pass_40_plays', ['QB']))
+    for label, key, positions in families:
+        for position in positions:
+            d = df[df.position == position]
+            if d.empty or d[f"act_{key}"].sum() == 0:
+                continue
+            a, p_ = d[f"act_{key}"].sum(), d[f"proj_{key}"].sum()
+            print(f"  {label:22s}{position:6s}{a:10.0f}{p_:12.0f}{p_ / a:8.0%}")
+        d = df[df.position.isin(positions)]
+        a, p_ = d[f"act_{key}"].sum(), d[f"proj_{key}"].sum()
+        if a:
+            print(f"  {'':22s}{'ALL':6s}{a:10.0f}{p_:12.0f}{p_ / a:8.0%}\n")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--season", type=int, default=2026)
@@ -674,12 +762,17 @@ def main() -> int:
     ap.add_argument("--out", "-o", default="projections.csv")
     ap.add_argument("--backtest", action="store_true",
                     help="score the model against past seasons and exit")
+    ap.add_argument("--calibrate", action="store_true",
+                    help="check projected big plays against what happened, and exit")
     args = ap.parse_args()
 
     cache = fetch(args.season, args.history, Path(args.cache_dir))
     if args.backtest:
         seasons = list(range(args.season - 3, args.season))
         backtest(cache, seasons, args.games)
+        return 0
+    if args.calibrate:
+        calibrate(cache, args.season - 1, args.games)
         return 0
 
     proj = build(args.season, cache, args.games, args.role_weight)

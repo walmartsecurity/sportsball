@@ -80,13 +80,39 @@ absolute error improves from 88–98 to 74–81 over the same window.)
 
 ### Are the big plays calibrated?
 
-SFB16 pays ten points a pop for explosive plays, so the projections have to
-imply a realistic number of them. Checked against what the NFL actually
-produces: the top thirty-two projected quarterbacks land at **101%** of real
-attempt volume, and the top thirty projected receivers at 85% of the realized
-top thirty's receptions and 88% of their 20-yard catches. Sitting under the
-realized top-N is correct, not a miss — those players are partly the ones who
-got lucky, and a projection that matched them would be claiming to know which.
+SFB16 pays ten points a pop for explosive plays, so a projection that is right
+about yardage and wrong about how that yardage arrives will misprice the board.
+`--calibrate` projects a past season and compares expected big plays against
+what those *same players* actually did — same-player rather than top-N against
+top-N, which would flatter or punish the model for selection rather than
+accuracy:
+
+```
+python tools/project_from_nflverse.py --calibrate
+```
+
+| bonus | position | ratio |
+|---|---|---|
+| 20+ yard receptions | WR | 85% |
+| | TE | 90% |
+| | RB | 107% |
+| 40+ yard pass plays | QB | 93% |
+| 40+ yard runs | RB | 69% |
+| | QB | 71% |
+
+The receiving numbers are the ones that matter: 20-yard catches are **83% of a
+receiver's bonus points and 94% of a tight end's**, and they land within about
+10%. Coming in slightly under is the expected direction, since a projection is
+a mean and big plays are right-skewed.
+
+**40-yard runs are genuinely under-projected by ~30%,** and worth stating
+plainly rather than burying. They are also the least valuable bonus in the
+format — 12% of a running back's bonus points, which are themselves 28% of his
+value — so the miss is worth roughly two points on a four-hundred-point back.
+The cause is the efficiency elasticity compounding with the projection's own
+regression toward the mean. Correcting it in the bonus model would break every
+*other* projection source, which supplies unshrunk efficiency, so it stays
+documented rather than patched.
 
 Scaling each team's projected volume to a realistic team season was tried as a
 fix for the quarterback inflation and **removed**: it corrects the total while
