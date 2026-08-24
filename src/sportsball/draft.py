@@ -238,6 +238,23 @@ class DraftState:
             value=self._score,
         )
 
+    def suggestions(self, board: ValuationBoard | None = None, limit: int = 6):
+        """Players worth bidding on right now. See :mod:`sportsball.suggest`."""
+        from .suggest import suggestions as _suggest
+
+        return _suggest(self, board or self.board(), limit=limit)
+
+    def room_pricing(self):
+        """What the room is paying per position, as a share of model value."""
+        from .suggest import room_pricing as _room
+
+        return _room(self)
+
+    def pacing(self, any_edge: bool = False) -> str:
+        from .suggest import pacing as _pacing
+
+        return _pacing(self, any_edge)
+
     def my_lineup(self):
         return best_lineup(self.my_roster, self.league.lineup, value=self._score)
 

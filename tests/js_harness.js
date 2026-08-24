@@ -7,7 +7,7 @@ const script = html.slice(html.indexOf("const DATA = "), html.indexOf("/* ------
 
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 const engine = new Function(script + `
-  return { P, DATA, L, bestLineup, objective, wouldStart, personalRate, maxBid, priceOf,
+  return { P, DATA, L, bestLineup, objective, wouldStart, personalRate, maxBid, priceOf, suggestions, startableLeft, qbJobsLeft, roomPricing,
            dollarsPerPoint, inflation, recordSale: (id,pr,t)=>{ sales.push({id,price:pr,team:t}); },
            setDPP: () => { DPP = dollarsPerPoint(); },
            state: () => ({ myBudget: myBudget(), myOpen: myOpen(), hardCap: hardCap(),
@@ -20,6 +20,7 @@ for (const sale of req.sales || []) engine.recordSale(sale.id, sale.price, sale.
 engine.setDPP();
 
 out.state = engine.state();
+out.room = engine.roomPricing();
 out.prices = (req.prices || []).map(id => engine.priceOf(engine.P.get(id)));
 if (req.lineup) {
   const roster = req.lineup.map(id => engine.P.get(id));
@@ -28,4 +29,10 @@ if (req.lineup) {
   out.starters = r.slots.filter(s => s.p).map(s => s.p.id);
 }
 out.maxBids = (req.maxBids || []).map(id => engine.maxBid(engine.P.get(id)));
+if (req.suggest) {
+  out.suggestions = engine.suggestions(req.suggest).map(r => ({
+    id: r.p.id, pos: r.p.pos, price: r.price, max: r.mb, edge: r.edge,
+    reasons: r.reasons, urgent: r.urgent,
+  }));
+}
 console.log(JSON.stringify(out));

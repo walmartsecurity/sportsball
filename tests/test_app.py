@@ -158,3 +158,60 @@ def test_a_third_quarterback_is_only_worth_a_bench_spot(app, py_board, tmp_path)
     fresh = run_js(app, {"maxBids": [qbs[2]]}, tmp_path)["maxBids"][0]
     stacked = run_js(app, {"sales": sales, "maxBids": [qbs[2]]}, tmp_path)["maxBids"][0]
     assert stacked < fresh
+
+
+# -- suggestions, in both implementations ----------------------------------
+
+
+def _py_state(sfb16, scored, sales):
+    from sportsball.draft import DraftState
+
+    state = DraftState(league=sfb16, players=list(scored))
+    for s in sales:
+        state.record_sale(state._by_id[s["id"]], s["price"], s["team"])
+    return state
+
+
+def test_fresh_suggestions_match_python(app, sfb16, scored, tmp_path):
+    out = run_js(app, {"suggest": 6}, tmp_path)
+    state = _py_state(sfb16, scored, [])
+    py = state.suggestions(limit=6)
+    assert [r["id"] for r in out["suggestions"]] == [r.player.player_id for r in py]
+
+
+def test_room_pricing_matches_python(app, sfb16, scored, py_board, tmp_path):
+    tes = [v for v in py_board if v.position == "TE"][:4]
+    sales = [{"id": v.player.player_id, "price": round(v.value * 0.7), "team": "x"}
+             for v in tes]
+    out = run_js(app, {"sales": sales, "suggest": 6}, tmp_path)
+    state = _py_state(sfb16, scored, sales)
+    py_room = state.room_pricing()
+    assert set(out["room"]) == set(py_room)
+    for pos, (ratio, n) in py_room.items():
+        # The payload rounds values to a decimal place, so the two agree to
+        # within that rounding rather than exactly.
+        assert out["room"][pos]["ratio"] == pytest.approx(ratio, rel=1e-3)
+        assert out["room"][pos]["n"] == n
+
+
+def test_underpriced_position_surfaces_in_both(app, sfb16, scored, py_board, tmp_path):
+    tes = [v for v in py_board if v.position == "TE"][:4]
+    sales = [{"id": v.player.player_id, "price": round(v.value * 0.7), "team": "x"}
+             for v in tes]
+    out = run_js(app, {"sales": sales, "suggest": 6}, tmp_path)
+    state = _py_state(sfb16, scored, sales)
+    js_te = [r["id"] for r in out["suggestions"] if r["pos"] == "TE"]
+    py_te = [r.player.player_id for r in state.suggestions(limit=6) if r.position == "TE"]
+    assert js_te and js_te == py_te
+
+
+def test_endgame_edge_matches_python(app, sfb16, scored, py_board, tmp_path):
+    filler = [v.player.player_id for v in py_board.valuations[100:118]]
+    sales = [{"id": pid, "price": 1, "team": "you"} for pid in filler]
+    out = run_js(app, {"sales": sales, "suggest": 4}, tmp_path)
+    state = _py_state(sfb16, scored, [dict(s, team="me") for s in sales])
+    py = state.suggestions(limit=4)
+    assert out["suggestions"] and py
+    assert [r["id"] for r in out["suggestions"]] == [r.player.player_id for r in py]
+    for js, pyr in zip(out["suggestions"], py):
+        assert js["max"] == pytest.approx(pyr.max_bid, abs=1)

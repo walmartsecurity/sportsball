@@ -12,6 +12,7 @@ pip install -e .
 sportsball values --tiers          # the cheat sheet
 sportsball roster                  # the best roster the board allows
 sportsball player "Brock Bowers"   # where one player's points come from
+sportsball targets                 # what is worth bidding on, and why
 sportsball draft                   # live auction assistant
 ```
 
@@ -223,6 +224,46 @@ Prices are relative, so corrections that move a whole position together
 largely cancel in the valuation step. What *did* change materially is roster
 construction — see below.
 
+## What to bid on
+
+The obvious feature would be a ranked list of best available players. It would
+also be close to meaningless: auction pricing sets every tier to the same value
+per dollar, so at list price one player is as good a deal as the next, and the
+optimizer is genuinely indifferent between them. Forcing the top of the board
+into a recommendation dresses that indifference up as insight.
+
+`sportsball targets` (and the app's panel) looks for the four things that
+actually constitute an edge:
+
+1. **Price.** A player available under your walk-away number. That gap is the
+   whole edge; everything else is commentary.
+2. **Fit.** Value you cannot start is worth a fraction of its price — a third
+   quarterback in a format that starts two is a bench body however good the
+   projection.
+3. **Scarcity.** Only the superflex slots are capped, so quarterbacks are the
+   one position that can run out from under you. When fewer startable ones
+   remain than there are jobs to fill, waiting gets expensive.
+4. **What the room is doing.** Rooms have habits: they chase running backs and
+   sleep on tight ends. Comparing realized sale prices against the model's
+   values, position by position, is the edge that shows up mid-draft — and it
+   is measured, not assumed.
+
+```
+PLAYER            POS  NOW   YOUR MAX  WHY
+----------------  ---  ----  --------  -----------------------------------------
+* Joe Burrow      QB   $174  $174      fills a superflex slot; only 21 startable
+                                       left for 24 jobs
+T.J. Hockenson    TE   $121  $121      room is paying 70% of value for TEs (4 sold)
+```
+
+Two things it deliberately will not do. It stays quiet when nothing is
+mispriced, rather than manufacturing a pick — an empty list with the money you
+have left per remaining spot is the honest answer, and the common one early.
+And **it does not treat falling prices as an edge**: when the room overspends,
+everything left gets cheaper for everyone at once, including you. An edge needs
+your money to go further than theirs, which is why the break-even compares your
+rate against the market's instead of watching prices drop.
+
 ## From points to dollars
 
 Auction pricing rests on an accounting identity: every team fills every roster
@@ -296,7 +337,8 @@ still works in a bare environment.
 `tools/build_app.py` bakes the board into a single self-contained HTML file —
 no server, no install, works from a phone at the table. Search the board, tap a
 player to see your walk-away price, record who won them and for how much;
-prices reprice after every sale and the draft is saved in the browser.
+prices reprice after every sale, a panel tracks what is worth bidding on, and
+the draft is saved in the browser.
 
 ```
 python tools/build_app.py --projections mine.csv --out app.html
@@ -409,7 +451,7 @@ pip install -e '.[dev]'
 pytest
 ```
 
-151 tests covering scoring against hand-computed totals, the lognormal bonus
+170 tests covering scoring against hand-computed totals, the lognormal bonus
 model, exact lineup assignment, replacement derivation, the money identity,
 budget discipline, max-bid economics, draft bookkeeping, and every CLI command.
 The fitting pipeline lives in `tools/fit_bonus_rates.py` and is rerun offline,
@@ -428,6 +470,7 @@ Layout:
 | `valuation.py` | value over replacement to dollars |
 | `optimize.py` | roster ILP and max bid |
 | `draft.py` | live auction state and inflation |
+| `suggest.py` | what to bid on, and when to stay quiet |
 | `cli.py` | the commands |
 | `tools/fit_bonus_rates.py` | fits the constants from nflverse play-by-play |
 | `tools/make_sample.py` | regenerates the synthetic sample projections |

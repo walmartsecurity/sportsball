@@ -262,6 +262,7 @@ Commands (player names accept any unambiguous prefix):
   me <player> <price>        you won the bid
   sold <player> <price> <tm> someone else won the bid
   undo                       take back the last sale
+  targets [n]                what is worth bidding on, and why
   max <player>               your true walk-away price
   best [pos] [n]             best remaining values at current prices
   plan                       best roster you can still finish
@@ -271,6 +272,15 @@ Commands (player names accept any unambiguous prefix):
   help                       this list
   quit                       exit
 """
+
+
+def cmd_targets(args: argparse.Namespace) -> int:
+    league, players, board = _build(args)
+    state = DraftState(league=league, players=players)
+    print(_header(league, board))
+    print()
+    _do_targets(state, [str(args.limit)])
+    return 0
 
 
 def cmd_draft(args: argparse.Namespace) -> int:
@@ -312,6 +322,8 @@ def cmd_draft(args: argparse.Namespace) -> int:
                 sale = state.undo()
                 print(f"undid: {state.find(sale.player_id).name} "
                       f"{_money(sale.price)} to {sale.team}")
+            elif command in ("targets", "t"):
+                _do_targets(state, rest)
             elif command == "max":
                 _do_max(state, rest)
             elif command == "best":
@@ -388,6 +400,29 @@ def _do_sale(state: DraftState, rest: Sequence[str], team: str | None) -> None:
         direction = "up" if inflation > 1 else "down"
         print(f"  market is {direction}: remaining players now cost "
               f"{inflation:.0%} of list")
+
+
+def _do_targets(state: DraftState, rest: Sequence[str]) -> None:
+    limit = int(rest[0]) if rest and rest[0].isdigit() else 6
+    board = state.board()
+    rows = state.suggestions(board, limit=limit)
+
+    room = state.room_pricing()
+    if room:
+        print("room is paying " + ", ".join(
+            f"{pos} {ratio:.0%} ({n} sold)" for pos, (ratio, n) in sorted(room.items())
+        ) + " of model value")
+
+    if rows:
+        table = [[
+            ("* " if r.urgent else "") + r.name,
+            r.position,
+            _money(r.price),
+            _money(r.max_bid),
+            "; ".join(r.reasons),
+        ] for r in rows]
+        print(_table(table, ["PLAYER", "POS", "NOW", "YOUR MAX", "WHY"]))
+    print(state.pacing(any_edge=any(r.edge > 0 for r in rows)))
 
 
 def _do_max(state: DraftState, rest: Sequence[str]) -> None:
@@ -539,6 +574,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_draft.add_argument("--me", default="me", help="your team name")
     p_draft.add_argument("--load", default=None, help="resume a saved draft")
     p_draft.set_defaults(func=cmd_draft)
+
+    p_targets = subs.add_parser("targets", help="what is worth bidding on")
+    p_targets.add_argument("--limit", "-n", type=int, default=6)
+    p_targets.set_defaults(func=cmd_targets)
 
     p_leagues = subs.add_parser("leagues", help="list bundled league configs")
     p_leagues.set_defaults(func=cmd_leagues)

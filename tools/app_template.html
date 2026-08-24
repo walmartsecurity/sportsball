@@ -180,6 +180,15 @@ tbody tr.sel { background: var(--accent-soft); }
 .log { max-height: 190px; overflow-y: auto; }
 .empty-note { color: var(--ink-3); font-size: 13px; padding: 6px 0; }
 .hr { height: 1px; background: var(--line-soft); margin: 12px 0; }
+
+/* Targets */
+.target { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 9px 10px; border-radius: 6px; background: var(--surface-2); margin-bottom: 6px; cursor: pointer; border-left: 3px solid transparent; }
+.target:hover { outline: 1px solid var(--line); }
+.target.urgent { border-left-color: var(--scarce); }
+.target .nm { font-weight: 600; }
+.target .px { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.target .px b { color: var(--good); }
+.target .why { grid-column: 1 / -1; font-size: 12.5px; color: var(--ink-2); line-height: 1.4; }
 .foot { max-width: 1500px; margin: 0 auto; padding: 4px 18px 28px; }
 
 /* Team money rows: fixed columns so the numbers line up. */
@@ -241,6 +250,10 @@ tbody tr.sel { background: var(--accent-soft); }
   </div>
 
   <div style="display:flex;flex-direction:column;gap:18px">
+    <div class="panel">
+      <div class="panel-head"><span class="lbl">Worth bidding on</span></div>
+      <div class="panel-body"><div id="targets"></div></div>
+    </div>
     <div class="panel">
       <div class="panel-head"><span class="lbl">Your lineup</span><span class="lbl" id="lineup-pts" style="margin-left:auto"></span></div>
       <div class="panel-body"><div class="slots" id="myslots"></div></div>
@@ -390,6 +403,150 @@ function maxBid(p) {
   return Math.min(cap, Math.max(L.minBid, Math.round(L.minBid + vor * rate)));
 }
 
+/* ---------------- what to chase ----------------
+   A ranked list of "best players available" would be close to meaningless
+   here. Auction pricing sets every tier to the same value per dollar, so at
+   list price one player is as good a deal as another and the optimizer is
+   genuinely indifferent between them. Suggesting the top of the board would
+   dress that indifference up as insight.
+
+   Real edge comes from three places, and each is checked separately below:
+
+   1. Price. The room is not a pricing model. When a player is available under
+      your walk-away number -- because early money was overspent, or because
+      you are flush relative to the spots you have left -- that gap is the
+      whole edge.
+   2. Fit. Value you cannot start is worth a fraction of its price. A third
+      quarterback in a format that starts two is a bench body no matter how
+      good he looks on the board.
+   3. Scarcity. Only the quarterback slots are capped, so quarterbacks are the
+      one position that can actually run out from under you. When fewer
+      startable ones remain than there are jobs to fill, waiting gets
+      expensive.
+   4. What the room is actually doing. Rooms have habits -- they chase running
+      backs, they sleep on tight ends. Comparing realized sale prices against
+      the model's values, position by position, is the one edge that shows up
+      mid-draft, and it is measured rather than assumed.
+
+   Note what is deliberately absent: falling prices are not an edge. When the
+   room overspends early, everything left gets cheaper for everyone at once,
+   including you. An edge needs your money to go further than theirs. */
+
+/* How the room is paying for each position, against the model. Below 1.0 they
+   are getting a discount you can take too. Needs a real sample before it says
+   anything. */
+const MARKET_SAMPLE = 3;
+function roomPricing() {
+  const out = {};
+  for (const pos of ["QB", "RB", "WR", "TE"]) {
+    const rows = sales.map(s => ({ s, p: P.get(s.id) })).filter(x => x.p.pos === pos);
+    if (rows.length < MARKET_SAMPLE) continue;
+    const paid = rows.reduce((a, x) => a + x.s.price, 0);
+    const worth = rows.reduce((a, x) => a + x.p.val, 0);
+    if (worth <= 0) continue;
+    out[pos] = { ratio: paid / worth, n: rows.length };
+  }
+  return out;
+}
+
+function startableLeft(pos) {
+  return available().filter(p => p.pos === pos && p.vor > 0).length;
+}
+
+/* Quarterback jobs still unclaimed across the league. */
+function qbJobsLeft() {
+  const cap = GROUPS.filter(g => g.positions.includes("QB"))
+                    .reduce((a, g) => a + g.count, 0);
+  const taken = sales.filter(s => P.get(s.id).pos === "QB").length;
+  return Math.max(L.teams * cap - taken, 0);
+}
+
+function maxStartersAt(pos) {
+  return GROUPS.filter(g => g.positions.includes(pos)).reduce((a, g) => a + g.count, 0);
+}
+
+function myStartersAt(pos) {
+  return bestLineup(myRoster()).starters.filter(p => p.pos === pos).length;
+}
+
+function suggestions(limit) {
+  if (myOpen() <= 0) return [];
+  const cap = hardCap();
+  const qbSqueeze = startableLeft("QB") <= qbJobsLeft();
+  const qbSlots = GROUPS.filter(g => g.positions.includes("QB"))
+                        .reduce((a, g) => a + g.count, 0);
+  const needQB = myStartersAt("QB") < qbSlots;
+
+  // Below this, a gap between price and walk-away is rounding, not an edge.
+  const MEANINGFUL = Math.max(L.minBid, Math.round(L.budget * 0.01));
+
+  const room = roomPricing();
+  const rows = [];
+  for (const p of available()) {
+    const price = Math.round(priceOf(p));
+    if (price > cap) continue;
+    if (!wouldStart(p)) continue;          // bench bodies are all worth $1
+    const mb = maxBid(p);
+    const edge = mb - price;
+    // Sorting on sub-dollar noise would rank mid-tier players over the ones
+    // actually worth chasing, so anything under the threshold ranks as zero.
+    const rank = edge >= MEANINGFUL ? edge : 0;
+    const reasons = [];
+    if (rank > 0) {
+      reasons.push(`${money(edge)} under your walk-away`);
+    }
+    const habit = room[p.pos];
+    if (habit && habit.ratio < 0.9) {
+      reasons.push(`room is paying ${Math.round(habit.ratio * 100)}% of value for `
+        + `${p.pos}s (${habit.n} sold)`);
+    }
+    if (p.pos === "QB" && needQB) {
+      reasons.push("fills a superflex slot");
+      if (qbSqueeze) {
+        reasons.push(`only ${startableLeft("QB")} startable left for ${qbJobsLeft()} jobs`);
+      }
+    }
+    if (!reasons.length) continue;
+    const discount = habit && habit.ratio < 0.9 ? (1 - habit.ratio) : 0;
+    rows.push({ p, price, mb, edge, rank, reasons, discount,
+                urgent: p.pos === "QB" && needQB && qbSqueeze });
+  }
+  rows.sort((a, b) => (b.urgent - a.urgent) || (b.rank - a.rank)
+    || (b.discount - a.discount) || (b.p.vor - a.p.vor));
+
+  // Never suggest more of a position than you could still start. Without this
+  // a scarcity flag on quarterbacks fills the whole list with them, when the
+  // lineup has room for two.
+  const slotsFree = {}, kept = [];
+  for (const r of rows) {
+    const pos = r.p.pos;
+    if (slotsFree[pos] === undefined) {
+      // Cap by what you could still start there, and by three regardless, so
+      // one underpriced position cannot crowd out everything else.
+      slotsFree[pos] = Math.min(maxStartersAt(pos) - myStartersAt(pos), 3);
+    }
+    if (slotsFree[pos] <= 0) continue;
+    slotsFree[pos]--;
+    kept.push(r);
+    if (kept.length >= (limit || 6)) break;
+  }
+  return kept;
+}
+
+/* When nothing stands out, say so and give the number that actually helps:
+   what the remaining budget works out to per remaining spot. */
+function pacing(anyPriceEdge) {
+  const open = myOpen();
+  if (open <= 0) return "Your roster is full.";
+  const perSlot = (myBudget() - open * L.minBid) / open;
+  const lead = anyPriceEdge
+    ? ""
+    : "Nothing on the board is mispriced for you right now. ";
+  return `${lead}You have ${money(myBudget())} for ${open} `
+    + `spot${open === 1 ? "" : "s"} — about ${money(perSlot)} of spending money `
+    + `each. Bid on whoever the room lets slide under the Now price.`;
+}
+
 /* ---------------- actions ---------------- */
 function recordSale(id, price, team) {
   sales.push({ id, price, team });
@@ -403,7 +560,8 @@ const el = id => document.getElementById(id);
 
 function render() {
   DPP = dollarsPerPoint();
-  renderBar(); renderBoard(); renderDetail(); renderMine(); renderTeams(); renderLog();
+  renderBar(); renderTargets(); renderBoard(); renderDetail(); renderMine();
+  renderTeams(); renderLog();
 }
 
 function renderBar() {
@@ -492,6 +650,38 @@ function renderDetail() {
     const v = Number(el("price").value);
     if (!(v >= L.minBid)) return;
     recordSale(p.id, v, (el("who").value || "").trim() || "other");
+  };
+}
+
+function roomNote() {
+  const room = roomPricing();
+  const parts = Object.entries(room).map(([pos, r]) =>
+    `${pos} ${Math.round(r.ratio * 100)}%`);
+  if (!parts.length) return "";
+  return `<p class="note"><span class="lbl">Room is paying</span> ${parts.join(" · ")} of model value.</p>`;
+}
+
+function renderTargets() {
+  const rows = suggestions(6);
+  const box = el("targets");
+  const anyEdge = rows.some(r => r.rank > 0);
+  if (!rows.length) {
+    box.innerHTML = roomNote() + `<p class="note">${pacing(false)}</p>`;
+    return;
+  }
+  box.innerHTML = rows.map(r => `
+    <div class="target${r.urgent ? " urgent" : ""}" data-id="${r.p.id}">
+      <div><span class="nm">${r.p.name}</span>
+        <span class="pteam">${r.p.pos} · ${r.p.team}</span></div>
+      <div class="px">${r.rank > 0
+        ? `${money(r.price)} → <b>${money(r.mb)}</b>`
+        : money(r.price)}</div>
+      <div class="why">${r.reasons.join(" · ")}</div>
+    </div>`).join("") + roomNote() + `<p class="note">${pacing(anyEdge)}</p>`;
+  box.onclick = e => {
+    const t = e.target.closest("[data-id]"); if (!t) return;
+    selected = t.dataset.id; render();
+    document.querySelector(".detail")?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 }
 
