@@ -31,6 +31,21 @@ What it does, in order:
    not projected into the job he used to have.
 7. **Filters to the season's actual rosters**, which drops retirements and
    anyone without an NFL job.
+Volume shrinks toward what a player's *slot* is worth, not toward one number
+for the whole position. This matters more than it sounds. Player populations
+are bimodal -- thirty-two men throw the ball and everyone else holds a
+clipboard -- so a positional median is a starter's workload, and shrinking a
+backup's small sample toward it promotes him. Before slot-aware priors the
+model had eighty quarterbacks over 300 attempts and projected 35,000 league
+pass attempts against a real 19,500, which inflated the 40-yard-pass-play
+bonus by 79%.
+
+Scaling each team's projected volume to a realistic team season was tried as a
+fix and removed: it corrects the total while leaving the shares wrong, so it
+simply deflated the starters who were already right, dropping the top thirty
+receivers to 54% of their real workload. Slot-aware priors fix the shares
+instead, and the totals then take care of themselves -- the top thirty-two
+quarterbacks project to 101% of their real attempt volume.
 
 Backtested against 2023-2025 (`--backtest`), the model beats both natural
 baselines on every season tried:
@@ -52,6 +67,7 @@ import argparse
 import glob
 import sys
 from pathlib import Path
+from typing import Mapping
 from urllib.request import urlretrieve
 
 try:
@@ -76,6 +92,12 @@ POSITIONS = ('QB', 'RB', 'WR', 'TE')
 # --- model constants, chosen by backtest over 2023-2025 -------------------
 HISTORY_WEIGHTS = (0.7, 0.2, 0.1)   # most recent season first
 K_VOLUME = 4.0      # games of positional prior mixed into per-game volume
+# Which slice of the position the volume prior represents. The median is the
+# wrong answer: player populations are bimodal -- a handful of starters and a
+# long tail of backups -- so shrinking a small sample toward the median hands
+# every third-stringer a starter's workload. The lower quartile beats the
+# median in backtest on both rank correlation and absolute error.
+VOLUME_PRIOR_QUANTILE = 0.25
 K_EFFICIENCY = 50.0 # opportunities of prior mixed into yards per opportunity
 K_TOUCHDOWN = 120.0 # touchdown rates are noisier still
 PROJECTED_GAMES = 16.0
@@ -83,6 +105,13 @@ AGE_PEAK = {'QB': 28.0, 'RB': 25.0, 'WR': 26.5, 'TE': 27.0}
 AGE_DECLINE = -0.030          # per year past the peak
 AGE_CLAMP = (0.60, 1.15)
 DEPTH_BLEND = 0.25            # how far toward the depth chart's role to move
+
+# Volume drivers, and the dependent stats that must scale with them.
+VOLUME_DRIVERS = {
+    'pass_att': ['pass_yds', 'pass_td', 'interceptions', 'pass_cmp'],
+    'rush_att': ['rush_yds', 'rush_td', 'rush_first_downs'],
+    'targets': ['receptions', 'rec_yds', 'rec_td', 'rec_first_downs'],
+}
 
 DRAFT_BUCKETS = ((15, '1-15'), (32, '16-32'), (64, '33-64'),
                  (105, '65-105'), (150, '106-150'), (10_000, '151+'))
@@ -188,6 +217,55 @@ STAT_COLS = ['games', 'pass_att', 'pass_cmp', 'pass_yds', 'pass_td',
              'rec_first_downs']
 
 
+def historical_role_volume(stats: pd.DataFrame, cache: Path) -> pd.DataFrame:
+    """Typical per-game volume for each slot in a team's pecking order.
+
+    A position's players are not interchangeable draws from one distribution:
+    a team has one quarterback who throws and three who do not. Ranking players
+    within their own team and season by volume recovers what each slot is
+    actually worth, which is the prior a projection needs.
+    """
+    rosters = pd.concat([
+        pd.read_parquet(f, columns=['season', 'gsis_id', 'team'])
+        for f in sorted(glob.glob(str(cache / "roster_*.parquet")))
+    ]).dropna(subset=['gsis_id']).drop_duplicates(['season', 'gsis_id'])
+    teamed = stats.merge(rosters, left_on=['pid', 'season'],
+                         right_on=['gsis_id', 'season'], how='inner')
+    teamed = teamed[teamed.games > 0]
+    if teamed.empty:
+        return pd.DataFrame()
+
+    frames = []
+    for driver in VOLUME_DRIVERS:
+        d = teamed[teamed[driver] > 0].copy()
+        if d.empty:
+            continue
+        d['per_game'] = d[driver] / d.games
+        d['rank'] = (d.groupby(['season', 'team', 'position'])[driver]
+                     .rank(method='first', ascending=False))
+        grouped = (d.groupby(['position', 'rank']).per_game.median()
+                   .reset_index().rename(columns={'per_game': driver}))
+        frames.append(grouped.set_index(['position', 'rank'])[[driver]])
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, axis=1).fillna(0.0)
+    return out
+
+
+def depth_ranks(cache: Path, season: int) -> dict[str, float]:
+    """Each player's current slot on his team's depth chart."""
+    path = cache / f"depth_{season}.parquet"
+    if not path.exists():
+        return {}
+    depth = pd.read_parquet(path)
+    if 'gsis_id' not in depth.columns or 'pos_rank' not in depth.columns:
+        return {}
+    depth['dt'] = pd.to_datetime(depth.get('dt'), errors='coerce')
+    depth = depth[depth.dt == depth.dt.max()]
+    depth = depth[depth.pos_abb.isin(POSITIONS)].dropna(subset=['gsis_id'])
+    return dict(zip(depth.gsis_id, depth.pos_rank))
+
+
 def _priors(agg: pd.DataFrame) -> dict:
     priors = {}
     for position, group in agg.groupby('position'):
@@ -195,10 +273,11 @@ def _priors(agg: pd.DataFrame) -> dict:
         if not len(q):
             q = group
         safe = lambda a, b: a.sum() / max(b.sum(), 1.0)
+        quantile = VOLUME_PRIOR_QUANTILE
         priors[position] = {
-            'pass_att': float((q.pass_att / q.wgames).median() or 0),
-            'rush_att': float((q.rush_att / q.wgames).median() or 0),
-            'targets': float((q.targets / q.wgames).median() or 0),
+            'pass_att': float((q.pass_att / q.wgames).quantile(quantile) or 0),
+            'rush_att': float((q.rush_att / q.wgames).quantile(quantile) or 0),
+            'targets': float((q.targets / q.wgames).quantile(quantile) or 0),
             'ypa': safe(q.pass_yds, q.pass_att),
             'ypc': safe(q.rush_yds, q.rush_att),
             'ypt': safe(q.rec_yds, q.targets),
@@ -213,8 +292,17 @@ def _priors(agg: pd.DataFrame) -> dict:
     return priors
 
 
-def project_veterans(stats: pd.DataFrame, season: int, games: float) -> pd.DataFrame:
-    """Weighted, shrunk projection from the seasons before ``season``."""
+def project_veterans(stats: pd.DataFrame, season: int, games: float,
+                     role_volume: pd.DataFrame | None = None,
+                     ranks: Mapping[str, float] | None = None) -> pd.DataFrame:
+    """Weighted, shrunk projection from the seasons before ``season``.
+
+    When a depth chart is available, volume shrinks toward what that player's
+    *slot* is typically worth rather than toward a single number for the whole
+    position. Without it a backup is pulled up toward a starter's workload,
+    which put eighty quarterbacks over 300 attempts in a league that starts
+    thirty-two.
+    """
     weights = {season - i - 1: w for i, w in enumerate(HISTORY_WEIGHTS)}
     hist = stats[stats.season.isin(weights)].copy()
     if hist.empty:
@@ -226,9 +314,20 @@ def project_veterans(stats: pd.DataFrame, season: int, games: float) -> pd.DataF
            .reset_index().rename(columns={'games': 'wgames'}))
     priors = _priors(agg)
 
+    ranks = ranks or {}
+    has_roles = role_volume is not None and not role_volume.empty
+
     rows = []
     for row in agg.itertuples():
-        prior = priors[row.position]
+        prior = dict(priors[row.position])
+        rank = ranks.get(row.pid)
+        if has_roles and rank is not None:
+            key = (row.position, float(rank))
+            if key in role_volume.index:
+                slot = role_volume.loc[key]
+                for driver in VOLUME_DRIVERS:
+                    if driver in slot and not pd.isna(slot[driver]):
+                        prior[driver] = float(slot[driver])
         gw = max(row.wgames, 0.0)
 
         def volume(value, key):
@@ -292,41 +391,75 @@ def apply_age(proj: pd.DataFrame, season: int, cache: Path) -> pd.DataFrame:
     return proj
 
 
+def _name_key(name: str, position: str) -> str:
+    """Normalised (name, position) key for matching across nflverse files."""
+    text = str(name).lower()
+    for junk in (".", "'", "`", "-"):
+        text = text.replace(junk, "")
+    parts = [t for t in text.split()
+             if t not in ("jr", "sr", "ii", "iii", "iv", "v")]
+    return " ".join(parts) + "|" + str(position).upper()
+
+
 def project_rookies(stats: pd.DataFrame, season: int, cache: Path,
                     games: float) -> pd.DataFrame:
-    """Rookies have no history, so project them from where they were drafted."""
+    """Rookies have no history, so project them from where they were drafted.
+
+    Matched by name rather than player id: nflverse assigns real ids to a draft
+    class only once the season is under way, so the freshest class carries
+    placeholders that join to nothing. Rookies on the roster who do not appear
+    in the draft file are treated as undrafted and given the last bucket.
+    """
+    roster_path = cache / f"roster_{season}.parquet"
     picks_path = cache / "draft_picks.parquet"
-    if not picks_path.exists():
+    if not roster_path.exists() or not picks_path.exists():
         return pd.DataFrame()
-    picks = pd.read_parquet(picks_path,
-                            columns=['season', 'pick', 'gsis_id', 'position'])
-    picks = picks.dropna(subset=['gsis_id'])
+
+    picks = pd.read_parquet(
+        picks_path, columns=['season', 'pick', 'gsis_id', 'position',
+                             'pfr_player_name'])
     picks = picks[picks.position.isin(POSITIONS)]
     picks['bucket'] = picks.pick.apply(draft_bucket)
 
-    past = stats.merge(picks[['gsis_id', 'season', 'bucket']],
+    # The historical profile joins cleanly on ids: past classes have real ones.
+    past = stats.merge(picks.dropna(subset=['gsis_id'])[['gsis_id', 'season', 'bucket']],
                        left_on=['pid', 'season'], right_on=['gsis_id', 'season'])
     if past.empty:
         return pd.DataFrame()
-
     per_game = past.copy()
     for col in STAT_COLS:
         if col != 'games':
             per_game[col] = per_game[col] / per_game.games.clip(lower=1)
-    profile = per_game.groupby(['position', 'bucket'])[
-        [c for c in STAT_COLS if c != 'games']].median()
-    fallback = per_game.groupby('position')[
-        [c for c in STAT_COLS if c != 'games']].median()
+    stat_cols = [c for c in STAT_COLS if c != 'games']
+    profile = per_game.groupby(['position', 'bucket'])[stat_cols].median()
+    fallback = per_game.groupby('position')[stat_cols].median()
+
+    roster = pd.read_parquet(
+        roster_path,
+        columns=['gsis_id', 'full_name', 'position', 'years_exp', 'status'])
+    roster = roster.dropna(subset=['gsis_id'])
+    roster = roster[roster.position.isin(POSITIONS)]
+    roster = roster[roster.years_exp.fillna(0) == 0]
+    if roster.empty:
+        return pd.DataFrame()
 
     incoming = picks[picks.season == season]
+    bucket_by_name = {
+        _name_key(n, p): b
+        for n, p, b in zip(incoming.pfr_player_name, incoming.position,
+                           incoming.bucket)
+    }
+
     rows = []
-    for row in incoming.itertuples():
-        key = (row.position, row.bucket)
+    for row in roster.itertuples():
+        bucket = bucket_by_name.get(_name_key(row.full_name, row.position),
+                                    DRAFT_BUCKETS[-1][1])
+        key = (row.position, bucket)
         source = profile.loc[key] if key in profile.index else fallback.loc[row.position]
-        entry = dict(pid=row.gsis_id, position=row.position, games=games, rookie=True)
-        for col in STAT_COLS:
-            if col != 'games':
-                entry[col] = float(source[col]) * games
+        entry = dict(pid=row.gsis_id, position=row.position, games=games,
+                     rookie=True)
+        for col in stat_cols:
+            entry[col] = float(source[col]) * games
         rows.append(entry)
     return pd.DataFrame(rows)
 
@@ -421,16 +554,7 @@ OUT_COLS = ['name', 'position', 'team', 'games', 'pass_att', 'pass_cmp',
 
 def to_csv(proj: pd.DataFrame, season: int, cache: Path, out: Path,
            limit: int) -> int:
-    roster = pd.read_parquet(cache / f"roster_{season}.parquet",
-                             columns=['gsis_id', 'full_name', 'team', 'position',
-                                      'status'])
-    roster = roster.dropna(subset=['gsis_id']).drop_duplicates('gsis_id')
-    roster = roster[roster.status.isin(['ACT', 'RES', 'E14'])]
-    merged = proj.merge(roster, left_on='pid', right_on='gsis_id', how='inner',
-                        suffixes=('', '_r'))
-    merged['position'] = merged['position_r'].where(
-        merged['position_r'].isin(POSITIONS), merged['position'])
-
+    merged = proj.copy()
     merged['pass_cmp'] = merged.pass_att * 0.655
     merged['fumbles_lost'] = merged.rush_att * 0.006 + merged.receptions * 0.008
     merged['two_point'] = 0.2
@@ -453,14 +577,33 @@ def to_csv(proj: pd.DataFrame, season: int, cache: Path, out: Path,
 
 # --------------------------------------------------------------------------
 
+def attach_rosters(proj: pd.DataFrame, season: int, cache: Path) -> pd.DataFrame:
+    """Keep only players with a job this season, and record who they play for."""
+    roster = pd.read_parquet(cache / f"roster_{season}.parquet",
+                             columns=['gsis_id', 'full_name', 'team', 'position',
+                                      'status'])
+    roster = roster.dropna(subset=['gsis_id']).drop_duplicates('gsis_id')
+    roster = roster[roster.status.isin(['ACT', 'RES', 'E14'])]
+    merged = proj.merge(roster, left_on='pid', right_on='gsis_id', how='inner',
+                        suffixes=('', '_r'))
+    merged['position'] = merged['position_r'].where(
+        merged['position_r'].isin(POSITIONS), merged['position'])
+    return merged.drop(columns=[c for c in ('position_r',) if c in merged])
+
+
 def build(season: int, cache: Path, games: float, blend: float) -> pd.DataFrame:
     stats = seasonal_stats(cache)
-    veterans = project_veterans(stats, season, games)
+    role_volume = historical_role_volume(stats, cache)
+    ranks = depth_ranks(cache, season)
+    veterans = project_veterans(stats, season, games, role_volume, ranks)
     veterans = apply_age(veterans, season, cache)
     rookies = project_rookies(stats, season, cache, games)
     proj = pd.concat([veterans, rookies], ignore_index=True)
     proj = proj.drop_duplicates('pid', keep='first')
-    return apply_depth_chart(proj, season, cache, blend)
+    proj = apply_depth_chart(proj, season, cache, blend)
+    # Roster first, then normalise: the team totals must be divided among the
+    # players who actually have jobs, not everyone who ever took a snap.
+    return attach_rosters(proj, season, cache)
 
 
 def backtest(cache: Path, seasons: list[int], games: float) -> None:

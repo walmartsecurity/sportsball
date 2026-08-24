@@ -53,10 +53,16 @@ The model, in the order it matters:
 - **Rookies come from draft capital**, since they have no history at all. Where
   a player was taken predicts his rookie scoring rate with a Spearman
   correlation of 0.43–0.58, comfortably beating a positional average.
+- **Slot-aware volume priors.** Volume shrinks toward what a player's *slot* on
+  the depth chart is worth, not toward one number for the whole position. This
+  matters more than it sounds: player populations are bimodal — thirty-two men
+  throw the ball and everyone else holds a clipboard — so a positional median
+  *is* a starter's workload, and shrinking a backup toward it promotes him.
+  Before this, the model had eighty quarterbacks over 300 attempts and
+  projected 35,000 league pass attempts against a real 19,500, which inflated
+  the 40-yard-pass-play bonus by 79%.
 - **A blend toward the current depth chart**, so someone who changed teams is
-  not projected into the job he used to have. This is the one component without
-  a clean backtest — depth charts before 2025 are published in a different
-  shape — so its weight is modest and `--role-weight 0` turns it off.
+  not projected into the job he used to have. `--role-weight 0` turns it off.
 - **Filtered to the season's actual rosters**, which drops retirements.
 
 ### It beats the natural baselines, by a little
@@ -65,12 +71,28 @@ Backtested against three seasons, predicting each from the seasons before it:
 
 | season | last season | 3yr weighted | this model |
 |---|---|---|---|
-| 2023 | 0.651 | 0.640 | **0.725** |
-| 2024 | 0.681 | 0.691 | **0.709** |
-| 2025 | 0.718 | 0.739 | **0.777** |
+| 2023 | 0.650 | 0.639 | **0.726** |
+| 2024 | 0.680 | 0.689 | **0.721** |
+| 2025 | 0.722 | 0.742 | **0.787** |
 
 (Spearman correlation with actual SFB16 points, players with 8+ games. Mean
-absolute error improves from 89–97 to 77–83 over the same window.)
+absolute error improves from 88–98 to 74–81 over the same window.)
+
+### Are the big plays calibrated?
+
+SFB16 pays ten points a pop for explosive plays, so the projections have to
+imply a realistic number of them. Checked against what the NFL actually
+produces: the top thirty-two projected quarterbacks land at **101%** of real
+attempt volume, and the top thirty projected receivers at 85% of the realized
+top thirty's receptions and 88% of their 20-yard catches. Sitting under the
+realized top-N is correct, not a miss — those players are partly the ones who
+got lucky, and a projection that matched them would be claiming to know which.
+
+Scaling each team's projected volume to a realistic team season was tried as a
+fix for the quarterback inflation and **removed**: it corrects the total while
+leaving the shares wrong, so it deflated the starters that were already right,
+dropping the top thirty receivers to 54% of their real workload. Slot-aware
+priors fix the shares instead, and the totals then take care of themselves.
 
 Read that as a real but modest edge, and note what the model cannot know: camp
 battles, holdouts, suspensions, scheme changes, or who looked good in August. A
