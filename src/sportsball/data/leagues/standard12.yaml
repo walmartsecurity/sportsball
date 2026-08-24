@@ -1,0 +1,46 @@
+# A conventional 12-team full-PPR auction league, for comparison against the
+# SFB16 config. Same engine, ordinary rules.
+name: Standard 12-team PPR
+teams: 12
+budget: 200
+roster_size: 16
+min_bid: 1
+games: 17
+
+lineup:
+  - name: QB
+    count: 1
+    positions: [QB]
+  - name: RB
+    count: 2
+    positions: [RB]
+  - name: WR
+    count: 2
+    positions: [WR]
+  - name: TE
+    count: 1
+    positions: [TE]
+  - name: FLEX
+    count: 1
+    positions: [RB, WR, TE]
+
+scoring:
+  pass_yds: 0.04
+  pass_td: 4
+  interception: -2
+  rush_yds: 0.1
+  rush_td: 6
+  rec_yds: 0.1
+  rec_td: 6
+  reception: 1.0
+  fumble_lost: -2
+  two_point: 2
+  rush_first_down: 0
+  rec_first_down: 0
+  reception_bonus: {}
+  first_down_bonus: {}
+
+bonuses:
+  enabled: false
+
+bench_weight: 0.3

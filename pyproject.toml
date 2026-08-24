@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sportsball"
+version = "0.1.0"
+description = "Fantasy football auction optimizer, tuned for Scott Fish Bowl 16 scoring"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+solver = ["PuLP>=2.7"]
+dev = ["pytest>=7", "PuLP>=2.7"]
+
+[project.scripts]
+sportsball = "sportsball.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sportsball = ["data/*.csv", "data/leagues/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    # PuLP 3.x deprecates the LpVariable constructor in favour of an API that
+    # does not exist in the versions we still support. Revisit at PuLP 4.
+    "ignore:Constructing LpVariable:DeprecationWarning",
+    "ignore:PULP_CBC_CMD is deprecated:DeprecationWarning",
+]

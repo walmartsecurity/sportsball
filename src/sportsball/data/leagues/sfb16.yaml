@@ -1,0 +1,60 @@
+# Scott Fish Bowl 16 -- "SFB9 Redux" format.
+#
+# Lineup: 10 starters, 10 bench (20 roster spots).
+#   0-2 from QB/RB/WR/TE  (this is what caps quarterbacks at two)
+#   0-8 from RB/WR/TE
+# There are no positional minimums at all: a legal lineup can start zero
+# quarterbacks and ten pass catchers.
+#
+# Scoring is taken from the published SFB16 graphic. That graphic lists only
+# positive scoring, so interceptions and lost fumbles are set to 0 here rather
+# than invented -- change them if your league penalises turnovers.
+name: Scott Fish Bowl 16
+teams: 12
+budget: 200
+roster_size: 20
+min_bid: 1
+games: 17
+
+lineup:
+  - name: SUPERFLEX
+    count: 2
+    positions: [QB, RB, WR, TE]
+  - name: FLEX
+    count: 8
+    positions: [RB, WR, TE]
+
+scoring:
+  # 1 point per 25 passing yards, 1 per 10 rushing/receiving.
+  pass_yds: 0.04
+  rush_yds: 0.1
+  rec_yds: 0.1
+  # 6 points for ALL touchdowns, including passing.
+  pass_td: 6
+  rush_td: 6
+  rec_td: 6
+  two_point: 2
+  interception: 0
+  fumble_lost: 0
+  # 0.5 per reception and per rushing/receiving first down.
+  reception: 0.5
+  rush_first_down: 0.5
+  rec_first_down: 0.5
+  pass_first_down: 0
+  # Tight end premium: +1 per reception and +1 per first down on top.
+  reception_bonus:
+    TE: 1.0
+  first_down_bonus:
+    TE: 1.0
+
+bonuses:
+  enabled: true
+  points: 10
+  pass_game_thresholds: [300, 400]
+  scrimmage_game_thresholds: [100, 200]
+
+# Bench spots are insurance and upside, not points. Tune to taste.
+bench_weight: 0.35
+# SFB is a tournament with one overall winner, so pricing pure medians is
+# arguably the wrong game. Raise toward 1.0 to pay up for ceiling.
+upside_weight: 0.0
