@@ -12,11 +12,11 @@ from sportsball.config import (
 
 def test_sfb16_shape(sfb16):
     assert sfb16.teams == 12
-    assert sfb16.budget == 200
+    assert sfb16.budget == 1000
     assert sfb16.roster_size == 20
     assert sfb16.starters == 10
     assert sfb16.bench == 10
-    assert sfb16.total_budget == 2400
+    assert sfb16.total_budget == 12000
     assert sfb16.drafted_players == 240
 
 

@@ -11,7 +11,7 @@
 # than invented -- change them if your league penalises turnovers.
 name: Scott Fish Bowl 16
 teams: 12
-budget: 200
+budget: 1000
 roster_size: 20
 min_bid: 1
 games: 17

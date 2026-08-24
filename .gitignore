@@ -10,3 +10,4 @@ venv/
 htmlcov/
 *.draft.json
 .nflverse-cache/
+app.html

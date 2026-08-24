@@ -15,6 +15,12 @@ sportsball player "Brock Bowers"   # where one player's points come from
 sportsball draft                   # live auction assistant
 ```
 
+Or build the web app, which is what you actually want open at the draft table:
+
+```
+python tools/build_app.py --out app.html   # then open app.html
+```
+
 Everything runs on the bundled sample projections out of the box. Point
 `--projections` at your own CSV for real numbers.
 
@@ -285,7 +291,35 @@ integer programming when installed (`pip install -e '.[solver]'`). Without it,
 a greedy construction plus a swap pass lands within a few percent, so the tool
 still works in a bare environment.
 
-## The live draft assistant
+## The draft-room web app
+
+`tools/build_app.py` bakes the board into a single self-contained HTML file —
+no server, no install, works from a phone at the table. Search the board, tap a
+player to see your walk-away price, record who won them and for how much;
+prices reprice after every sale and the draft is saved in the browser.
+
+```
+python tools/build_app.py --projections mine.csv --out app.html
+```
+
+The static maths — scoring, the bonus models, league-wide replacement level —
+is computed in Python and baked in as JSON. The browser only runs what changes
+during a draft: repricing, your roster, and the max-bid calculation.
+
+That last one is done differently in the two places, deliberately. The CLI
+solves an exact integer program over the whole roster. The browser uses the
+closed form: auction pricing is an accounting identity, so a dollar buys a
+fixed amount of value over replacement, and paying above the market rate for
+one player is only correct when you cannot deploy the money elsewhere — which
+is exactly what happens late, with cash left and few spots. The app takes the
+higher of the market's rate and your own, capped by your wallet.
+
+Two implementations of the same maths drift unless something holds them
+together. `tests/test_app.py` runs the browser engine under node and checks it
+against the Python one — prices, inflation, lineup assignment, and max bids
+(which agree within a few percent). Those tests skip when node is missing.
+
+## The live draft assistant (CLI)
 
 ```
 sportsball draft --me "my team"
@@ -375,7 +409,7 @@ pip install -e '.[dev]'
 pytest
 ```
 
-140 tests covering scoring against hand-computed totals, the lognormal bonus
+151 tests covering scoring against hand-computed totals, the lognormal bonus
 model, exact lineup assignment, replacement derivation, the money identity,
 budget discipline, max-bid economics, draft bookkeeping, and every CLI command.
 The fitting pipeline lives in `tools/fit_bonus_rates.py` and is rerun offline,
@@ -397,3 +431,5 @@ Layout:
 | `cli.py` | the commands |
 | `tools/fit_bonus_rates.py` | fits the constants from nflverse play-by-play |
 | `tools/make_sample.py` | regenerates the synthetic sample projections |
+| `tools/build_app.py` | builds the standalone draft-room web app |
+| `tools/app_template.html` | the app's markup, styles and browser engine |

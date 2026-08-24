@@ -57,12 +57,13 @@ def test_an_expensive_required_player_still_gets_rostered(sfb16, board):
 def test_owned_players_are_kept_and_cost_nothing(sfb16, board):
     owned = [board.valuations[0].player, board.valuations[5].player]
     plan = optimize_roster(
-        board, sfb16, budget=100, slots_to_fill=sfb16.roster_size - 2, owned=owned
+        board, sfb16, budget=sfb16.budget / 2, slots_to_fill=sfb16.roster_size - 2,
+        owned=owned
     )
     ids = {p.player_id for p in plan.roster}
     assert all(p.player_id in ids for p in owned)
     assert len(plan.roster) == sfb16.roster_size
-    assert plan.spend <= 100 + 1e-6
+    assert plan.spend <= sfb16.budget / 2 + 1e-6
 
 
 def test_bench_is_valued_over_replacement_not_raw_points(sfb16, board, plan):
@@ -77,8 +78,8 @@ def test_bench_is_valued_over_replacement_not_raw_points(sfb16, board, plan):
 
 
 def test_a_bigger_budget_never_hurts(sfb16, board):
-    poor = optimize_roster(board, sfb16, budget=100)
-    rich = optimize_roster(board, sfb16, budget=200)
+    poor = optimize_roster(board, sfb16, budget=sfb16.budget / 2)
+    rich = optimize_roster(board, sfb16, budget=sfb16.budget)
     assert rich.objective >= poor.objective - 1e-6
 
 
@@ -98,39 +99,39 @@ def test_max_bid_is_close_to_list_value_before_the_draft(sfb16, board):
     """With a full budget and an untouched board, break-even should track the
     list price -- that is what the list price means."""
     for v in board.top(5):
-        bid = max_bid(v.player, board, sfb16, budget=200, slots_to_fill=20)
-        assert bid == pytest.approx(v.value, abs=6.0)
+        bid = max_bid(v.player, board, sfb16, budget=sfb16.budget, slots_to_fill=sfb16.roster_size)
+        assert bid == pytest.approx(v.value, abs=0.03 * sfb16.budget)
 
 
 def test_max_bid_never_exceeds_what_you_can_afford(sfb16, board):
     target = board.valuations[0].player
-    bid = max_bid(target, board, sfb16, budget=50, slots_to_fill=20)
-    assert bid <= 50 - 19 * sfb16.min_bid
+    bid = max_bid(target, board, sfb16, budget=sfb16.budget / 4, slots_to_fill=sfb16.roster_size)
+    assert bid <= sfb16.budget / 4 - (sfb16.roster_size - 1) * sfb16.min_bid
 
 
 def test_max_bid_is_higher_for_a_better_player(sfb16, board):
     best = board.valuations[0].player
     worse = board.valuations[40].player
-    assert max_bid(best, board, sfb16, budget=200, slots_to_fill=20) >= max_bid(
-        worse, board, sfb16, budget=200, slots_to_fill=20
+    assert max_bid(best, board, sfb16, budget=sfb16.budget, slots_to_fill=sfb16.roster_size) >= max_bid(
+        worse, board, sfb16, budget=sfb16.budget, slots_to_fill=sfb16.roster_size
     )
 
 
 def test_max_bid_is_zero_with_no_slots_left(sfb16, board):
     target = board.valuations[0].player
-    assert max_bid(target, board, sfb16, budget=50, slots_to_fill=0) == 0.0
+    assert max_bid(target, board, sfb16, budget=sfb16.budget / 4, slots_to_fill=0) == 0.0
 
 
 def test_paying_more_than_max_bid_makes_the_roster_worse(sfb16, board):
     """The definition of the number: one dollar past it, you are behind."""
     target = board.valuations[3].player
-    bid = max_bid(target, board, sfb16, budget=200, slots_to_fill=20)
+    bid = max_bid(target, board, sfb16, budget=sfb16.budget, slots_to_fill=sfb16.roster_size)
     baseline = optimize_roster(
-        board, sfb16, budget=200, slots_to_fill=20, exclude=[target.player_id]
+        board, sfb16, budget=sfb16.budget, slots_to_fill=sfb16.roster_size, exclude=[target.player_id]
     ).objective
     over = optimize_roster(
-        board, sfb16, budget=200, slots_to_fill=20,
-        require=[target.player_id], prices={target.player_id: bid + 8},
+        board, sfb16, budget=sfb16.budget, slots_to_fill=sfb16.roster_size,
+        require=[target.player_id], prices={target.player_id: bid + 0.05 * sfb16.budget},
     ).objective
     assert over < baseline
 

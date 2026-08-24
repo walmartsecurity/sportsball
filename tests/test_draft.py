@@ -16,11 +16,12 @@ def test_starts_empty(state, sfb16):
     assert state.sales == []
 
 
-def test_recording_a_sale_to_yourself_moves_money(state):
+def test_recording_a_sale_to_yourself_moves_money(state, sfb16):
     player = state.find("Ja'Marr Chase")
-    state.record_sale(player, 60, state.my_team)
-    assert state.my_spent == 60
-    assert state.my_budget == 140
+    price = sfb16.budget * 0.3
+    state.record_sale(player, price, state.my_team)
+    assert state.my_spent == price
+    assert state.my_budget == sfb16.budget - price
     assert state.my_open_slots == 19
     assert state.my_roster == [player]
 
@@ -44,10 +45,10 @@ def test_bids_below_the_minimum_are_rejected(state):
         state.record_sale(state.find("Ja'Marr Chase"), 0, "alice")
 
 
-def test_you_cannot_outbid_your_own_wallet(state):
+def test_you_cannot_outbid_your_own_wallet(state, sfb16):
     """Every remaining spot still has to be filled at a dollar apiece."""
     with pytest.raises(DraftError, match="cannot afford"):
-        state.record_sale(state.find("Ja'Marr Chase"), 200, state.my_team)
+        state.record_sale(state.find("Ja'Marr Chase"), sfb16.budget, state.my_team)
 
 
 def test_max_affordable_bid_reserves_a_dollar_per_open_slot(state, sfb16):
@@ -79,7 +80,8 @@ def test_sold_players_leave_the_board(state):
 def test_overpaying_early_deflates_the_rest_of_the_board(state):
     """Money spent above value has to come out of everyone else's price."""
     before = state.board().dollars_per_point
-    for name, price in (("Ja'Marr", 150), ("Brock Bowers", 150), ("Bijan", 150)):
+    big = state.league.budget * 0.75
+    for name, price in (("Ja'Marr", big), ("Brock Bowers", big), ("Bijan", big)):
         state.record_sale(state.find(name), price, "spendthrift")
     assert state.board().dollars_per_point < before
     assert state.inflation() < 1.0
@@ -103,13 +105,15 @@ def test_replacement_levels_do_not_drift_during_the_draft(state):
 def test_max_bid_falls_as_your_wallet_empties(state):
     target = state.find("Brock Bowers")
     rich = state.max_bid_for(target)
-    for name, price in (("Bijan", 60), ("Justin Jefferson", 60)):
+    chunk = state.league.budget * 0.3
+    for name, price in (("Bijan", chunk), ("Justin Jefferson", chunk)):
         state.record_sale(state.find(name), price, state.my_team)
     assert state.max_bid_for(target) < rich
 
 
 def test_plan_completes_a_partly_built_roster(state, sfb16):
-    state.record_sale(state.find("Brock Bowers"), 55, state.my_team)
+    state.record_sale(state.find("Brock Bowers"), state.league.budget * 0.27,
+                      state.my_team)
     plan = state.plan()
     assert len(plan.roster) == sfb16.roster_size
     assert "brock-bowers-te" in {p.player_id for p in plan.roster}
@@ -118,7 +122,7 @@ def test_plan_completes_a_partly_built_roster(state, sfb16):
 
 def test_my_lineup_respects_the_quarterback_cap(state, sfb16):
     for name in ("Lamar", "Joe Burrow", "Josh Allen", "Jayden Daniels"):
-        state.record_sale(state.find(name), 20, state.my_team)
+        state.record_sale(state.find(name), state.league.budget * 0.1, state.my_team)
     lineup = state.my_lineup()
     assert sum(1 for p in lineup.starters if p.position == "QB") == 2
 

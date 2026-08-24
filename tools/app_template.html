@@ -1,0 +1,585 @@
+<title>SFB16 Auction Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root {
+  --ground: #F7F8F5;
+  --surface: #FFFFFF;
+  --surface-2: #EFF1EC;
+  --line: #D8DCD3;
+  --line-soft: #E7EAE3;
+  --ink: #191D18;
+  --ink-2: #4A5149;
+  --ink-3: #7B8279;
+  --accent: #B36F12;
+  --accent-ink: #FFFFFF;
+  --accent-soft: #F6E8D2;
+  --good: #2F7A55;
+  --good-soft: #DCEEE4;
+  --bad: #B23F34;
+  --bad-soft: #F7E0DD;
+  --scarce: #5B4EA8;
+  --scarce-soft: #E6E2F5;
+  --shadow: 0 1px 2px rgba(25,29,24,.06), 0 4px 16px rgba(25,29,24,.05);
+  --radius: 7px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #13171A;
+    --surface: #1A1F22;
+    --surface-2: #222829;
+    --line: #333A3B;
+    --line-soft: #272E2F;
+    --ink: #E8ECE5;
+    --ink-2: #A8B0A8;
+    --ink-3: #767E77;
+    --accent: #E0952F;
+    --accent-ink: #171A12;
+    --accent-soft: #3A2E17;
+    --good: #5DB98A;
+    --good-soft: #1D3329;
+    --bad: #DE7267;
+    --bad-soft: #38211E;
+    --scarce: #9C8FE0;
+    --scarce-soft: #262242;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #13171A;
+  --surface: #1A1F22;
+  --surface-2: #222829;
+  --line: #333A3B;
+  --line-soft: #272E2F;
+  --ink: #E8ECE5;
+  --ink-2: #A8B0A8;
+  --ink-3: #767E77;
+  --accent: #E0952F;
+  --accent-ink: #171A12;
+  --accent-soft: #3A2E17;
+  --good: #5DB98A;
+  --good-soft: #1D3329;
+  --bad: #DE7267;
+  --bad-soft: #38211E;
+  --scarce: #9C8FE0;
+  --scarce-soft: #262242;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "Barlow", ui-sans-serif, system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace; font-variant-numeric: tabular-nums; }
+.lbl {
+  font-family: "Barlow Condensed", "Barlow", sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+button { font: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+/* ---------- situation bar ---------- */
+.bar {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  padding: 10px 16px;
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+}
+.brand {
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 700; font-size: 20px; letter-spacing: .02em;
+  text-transform: uppercase; margin-right: 4px; white-space: nowrap;
+}
+.brand span { color: var(--accent); }
+.stat { display: flex; flex-direction: column; line-height: 1.15; }
+.stat b { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 19px; font-weight: 600; }
+.stat.wide b { font-size: 16px; }
+.bar-actions { margin-left: auto; display: flex; gap: 8px; }
+.btn {
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  border-radius: var(--radius); padding: 7px 12px; font-weight: 500; font-size: 13px;
+}
+.btn:hover { border-color: var(--ink-3); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn-primary:hover { filter: brightness(1.07); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ---------- layout ---------- */
+.wrap { display: grid; grid-template-columns: minmax(0,1.55fr) minmax(300px,.95fr); gap: 18px; padding: 18px; max-width: 1500px; margin: 0 auto; align-items: start; }
+@media (max-width: 940px) { .wrap { grid-template-columns: 1fr; } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.panel-head { padding: 11px 14px; border-bottom: 1px solid var(--line-soft); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.panel-body { padding: 12px 14px; }
+
+/* ---------- controls ---------- */
+.search { flex: 1; min-width: 150px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); color: var(--ink); }
+.chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); background: transparent; color: var(--ink-2); border-radius: 99px; padding: 4px 11px; font-family: "Barlow Condensed", sans-serif; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; font-size: 12px; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+
+/* ---------- board ---------- */
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--line); font-family: "Barlow Condensed", sans-serif; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; font-weight: 600; color: var(--ink-3); white-space: nowrap; }
+th.col-name, th.col-pos { text-align: left; }
+th:nth-child(1), th:nth-child(2) { text-align: left; }
+td { padding: 7px 8px; border-bottom: 1px solid var(--line-soft); text-align: right; white-space: nowrap; }
+td.col-name, td.col-pos { text-align: left; }
+td:nth-child(1), td:nth-child(2) { text-align: left; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--surface-2); }
+tbody tr.sel { background: var(--accent-soft); }
+.pname { font-weight: 600; }
+.pteam { color: var(--ink-3); font-size: 12px; margin-left: 5px; }
+.pos { display: inline-block; min-width: 30px; text-align: center; font-family: "Barlow Condensed", sans-serif; font-weight: 700; font-size: 11px; letter-spacing: .06em; padding: 2px 5px; border-radius: 4px; background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line-soft); }
+.pos.QB { background: var(--scarce-soft); color: var(--scarce); border-color: transparent; }
+.money { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-weight: 600; }
+.muted { color: var(--ink-3); }
+
+/* ---------- detail ---------- */
+.detail { border-top: 2px solid var(--accent); background: var(--surface-2); padding: 14px; display: none; }
+.detail.on { display: block; }
+.detail-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.detail-name { font-family: "Barlow Condensed", sans-serif; font-size: 23px; font-weight: 700; }
+.maxbid { display: flex; align-items: baseline; gap: 12px; padding: 10px 0 12px; }
+.maxbid .num { font-family: "IBM Plex Mono", monospace; font-size: 38px; font-weight: 600; color: var(--accent); line-height: 1; font-variant-numeric: tabular-nums; }
+.facts { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; }
+.sale { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sale input[type=number] { width: 92px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); color: var(--ink); font-family: "IBM Plex Mono", monospace; font-weight: 600; }
+.sale input[type=text] { width: 110px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); color: var(--ink); }
+.warn { color: var(--bad); font-size: 13px; }
+
+/* ---------- roster ---------- */
+.slots { display: flex; flex-direction: column; gap: 3px; }
+.slot { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px; background: var(--surface-2); }
+.slot.empty { background: transparent; border: 1px dashed var(--line); color: var(--ink-3); }
+.slot.sf { box-shadow: inset 3px 0 0 var(--scarce); }
+.slot .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot .cost { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--ink-2); }
+.tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-family: "Barlow Condensed", sans-serif; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.tag.good { background: var(--good-soft); color: var(--good); }
+.tag.bad { background: var(--bad-soft); color: var(--bad); }
+.rows { display: flex; flex-direction: column; gap: 2px; }
+.row { display: flex; gap: 8px; align-items: center; padding: 4px 8px; border-radius: 5px; }
+.row:nth-child(odd) { background: var(--surface-2); }
+.row .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note { font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
+.log { max-height: 190px; overflow-y: auto; }
+.empty-note { color: var(--ink-3); font-size: 13px; padding: 6px 0; }
+.hr { height: 1px; background: var(--line-soft); margin: 12px 0; }
+.foot { max-width: 1500px; margin: 0 auto; padding: 4px 18px 28px; }
+
+/* Team money rows: fixed columns so the numbers line up. */
+.team-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 12px; align-items: baseline; padding: 5px 8px; border-radius: 5px; }
+.team-row:nth-child(odd) { background: var(--surface-2); }
+.team-row .n { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; color: var(--ink-3); font-size: 13px; }
+.team-row .left { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--ink-2); }
+.team-row .max { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* On a phone the board has to fit without sideways scrolling: the price you
+   are about to bid against is the whole point of looking. */
+@media (max-width: 720px) {
+  body { font-size: 14px; }
+  .bar { gap: 12px 14px; padding: 8px 12px; }
+  .brand { font-size: 16px; width: 100%; margin: 0; }
+  .stat b { font-size: 16px; }
+  .stat.wide b { font-size: 14px; }
+  .bar-actions { margin-left: auto; }
+  .wrap { padding: 12px; gap: 12px; }
+  .c-hide-sm { display: none; }
+  th, td { padding: 7px 5px; }
+  .maxbid .num { font-size: 32px; }
+  .sale input[type=number], .sale input[type=text] { flex: 1; min-width: 0; }
+}
+</style>
+
+<div class="bar">
+  <div class="brand">SFB16 <span>Auction Room</span></div>
+  <div class="stat"><span class="lbl">Your money</span><b id="s-budget">—</b></div>
+  <div class="stat"><span class="lbl">Slots left</span><b id="s-slots">—</b></div>
+  <div class="stat"><span class="lbl">Most you can bid</span><b id="s-cap">—</b></div>
+  <div class="stat wide"><span class="lbl">Market</span><b id="s-infl">—</b></div>
+  <div class="bar-actions">
+    <button class="btn" id="undo">Undo</button>
+    <button class="btn" id="reset">Reset draft</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div>
+    <div class="panel">
+      <div class="panel-head">
+        <input class="search" id="q" type="search" placeholder="Search players…" autocomplete="off">
+        <div class="chips" id="posfilter"></div>
+        <div class="chips"><button class="chip" id="hidesold" aria-pressed="true">Hide sold</button></div>
+      </div>
+      <div class="detail" id="detail"></div>
+      <div class="scroll">
+        <table>
+          <thead><tr>
+            <th class="c-hide-sm">#</th><th class="col-name">Player</th><th class="col-pos">Pos</th><th>Pts</th>
+            <th class="c-hide-sm">Bonus</th><th class="c-hide-sm">VOR</th>
+            <th class="c-hide-sm">List</th><th>Now</th>
+          </tr></thead>
+          <tbody id="board"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:18px">
+    <div class="panel">
+      <div class="panel-head"><span class="lbl">Your lineup</span><span class="lbl" id="lineup-pts" style="margin-left:auto"></span></div>
+      <div class="panel-body"><div class="slots" id="myslots"></div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="lbl">Your bench</span></div>
+      <div class="panel-body"><div class="rows" id="mybench"></div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="lbl">Money around the room</span></div>
+      <div class="panel-body"><div class="rows" id="teams"></div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="lbl">Sold</span></div>
+      <div class="panel-body"><div class="rows log" id="log"></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  <p class="note" id="footnote"></p>
+</div>
+
+<script>
+const DATA = __PAYLOAD__;
+const L = DATA.league, REPL = DATA.replacement, GROUPS = L.lineup;
+const MYTEAM = "you";
+const KEY = "sfb16-auction-room-v1";
+
+const P = new Map(DATA.players.map(p => [p.id, p]));
+let sales = [];
+let selected = null;
+let filterPos = null, hideSold = true, query = "";
+
+/* ---------------- persistence ---------------- */
+function save() { try { localStorage.setItem(KEY, JSON.stringify(sales)); } catch (e) {} }
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) sales = JSON.parse(raw).filter(s => P.has(s.id));
+  } catch (e) { sales = []; }
+}
+
+/* ---------------- derived state ---------------- */
+const soldIds = () => new Set(sales.map(s => s.id));
+const mySales = () => sales.filter(s => s.team === MYTEAM);
+const myRoster = () => mySales().map(s => P.get(s.id));
+const mySpent = () => mySales().reduce((a, s) => a + s.price, 0);
+const myBudget = () => L.budget - mySpent();
+const myOpen = () => L.rosterSize - mySales().length;
+const hardCap = () => myOpen() <= 0 ? 0 : myBudget() - (myOpen() - 1) * L.minBid;
+const leagueLeft = () => L.teams * L.budget - sales.reduce((a, s) => a + s.price, 0);
+const slotsLeft = () => L.teams * L.rosterSize - sales.length;
+
+function available() {
+  const gone = soldIds();
+  return DATA.players.filter(p => !gone.has(p.id));
+}
+
+/* Reprice against the money still in the room. Every dollar gets spent and
+   every roster spot gets filled, so overpaying early makes the rest cheaper. */
+function dollarsPerPoint() {
+  const pool = available().slice(0, Math.max(slotsLeft(), 0));
+  const vor = pool.reduce((a, p) => a + Math.max(p.vor, 0), 0);
+  const surplus = Math.max(leagueLeft() - slotsLeft() * L.minBid, 0);
+  return vor > 0 ? surplus / vor : 0;
+}
+let DPP = DATA.dollarsPerPoint;
+const priceOf = p => Math.max(L.minBid + Math.max(p.vor, 0) * DPP, L.minBid);
+const inflation = () => DATA.dollarsPerPoint > 0 ? DPP / DATA.dollarsPerPoint : 1;
+
+/* ---------------- lineup ----------------
+   Assigning players to overlapping slot groups is a bipartite matching, and
+   matchable sets form a transversal matroid -- so taking players in descending
+   points order, with an augmenting path for each, is exactly optimal. Greedy
+   first-fit is not: it burns a superflex slot on a flex player. */
+function bestLineup(roster) {
+  const slots = [];
+  GROUPS.forEach((g, gi) => { for (let i = 0; i < g.count; i++) slots.push({ gi, p: null }); });
+  const fits = (p, gi) => GROUPS[gi].positions.includes(p.pos);
+  function augment(p, seen) {
+    for (let s = 0; s < slots.length; s++) {
+      if (seen.has(s) || !fits(p, slots[s].gi)) continue;
+      seen.add(s);
+      if (slots[s].p === null || augment(slots[s].p, seen)) { slots[s].p = p; return true; }
+    }
+    return false;
+  }
+  const starters = [];
+  for (const p of [...roster].sort((a, b) => b.pts - a.pts)) {
+    if (p.pts > 0 && augment(p, new Set())) starters.push(p);
+  }
+  const pts = slots.reduce((a, s) => a + (s.p ? s.p.pts : 0), 0);
+  return { slots, starters, pts };
+}
+
+/* Bench players are worth what they add over a freely available replacement,
+   not their raw projection -- otherwise a bench of streamable quarterbacks
+   looks optimal, because quarterbacks score plenty even at replacement. */
+const benchValue = p => L.benchWeight * Math.max(p.pts - (REPL[p.pos] ?? 0), 0);
+
+function objective(roster) {
+  const { slots, pts } = bestLineup(roster);
+  const starting = new Set(slots.filter(s => s.p).map(s => s.p.id));
+  return pts + roster.reduce((a, p) => a + (starting.has(p.id) ? 0 : benchValue(p)), 0);
+}
+
+/* ---------------- what a player is worth to you ----------------
+   The break-even price is where buying this player leaves you exactly as well
+   off as spending the same money on everyone else. That has a closed form,
+   because auction pricing is an accounting identity: a dollar buys a fixed
+   amount of value over replacement, so paying more than the market rate for
+   one player is only correct when you cannot deploy the money elsewhere.
+
+   Two rates matter. The market's rate is what the room is paying per point of
+   value. Yours is the money you must still spend against the value your
+   remaining roster spots can actually absorb -- late in a draft, with cash
+   left and few spots, that rate goes up and so should your bids. You pay by
+   whichever is higher, capped by what your wallet allows.
+
+   The CLI solves the same question with an exact integer program over the
+   whole roster. That is slower and needs Python, and on a board where value
+   per dollar is nearly flat the two agree closely; tests/test_app.py pins them
+   together. */
+
+/* A player who cannot crack your lineup is worth only a bench spot -- the
+   third quarterback in a format that starts two, for instance. */
+function wouldStart(p) {
+  return bestLineup([...myRoster(), p]).starters.some(x => x.id === p.id);
+}
+
+function personalRate(excludeId) {
+  const open = myOpen();
+  if (open <= 0) return 0;
+  const pool = available().filter(x => x.id !== excludeId).slice(0, open);
+  const absorbable = pool.reduce((a, x) => a + Math.max(x.vor, 0), 0);
+  const surplus = Math.max(myBudget() - open * L.minBid, 0);
+  return absorbable > 0 ? surplus / absorbable : 0;
+}
+
+function maxBid(p) {
+  if (myOpen() <= 0) return 0;
+  const cap = Math.floor(hardCap());
+  if (cap < L.minBid) return 0;
+  const rate = Math.max(DPP, personalRate(p.id));
+  const vor = Math.max(p.vor, 0) * (wouldStart(p) ? 1 : L.benchWeight);
+  return Math.min(cap, Math.max(L.minBid, Math.round(L.minBid + vor * rate)));
+}
+
+/* ---------------- actions ---------------- */
+function recordSale(id, price, team) {
+  sales.push({ id, price, team });
+  save(); selected = null; render();
+}
+function undo() { sales.pop(); save(); selected = null; render(); }
+
+/* ---------------- rendering ---------------- */
+const money = v => "$" + Math.round(v).toLocaleString();
+const el = id => document.getElementById(id);
+
+function render() {
+  DPP = dollarsPerPoint();
+  renderBar(); renderBoard(); renderDetail(); renderMine(); renderTeams(); renderLog();
+}
+
+function renderBar() {
+  el("s-budget").textContent = money(myBudget());
+  el("s-slots").textContent = myOpen() + " / " + L.rosterSize;
+  el("s-cap").textContent = money(hardCap());
+  const inf = inflation();
+  const pct = Math.round(inf * 100);
+  el("s-infl").textContent = pct + "% of list";
+  el("s-infl").style.color = Math.abs(inf - 1) < 0.02 ? "var(--ink)"
+    : (inf > 1 ? "var(--bad)" : "var(--good)");
+  el("undo").disabled = sales.length === 0;
+}
+
+function renderBoard() {
+  const gone = soldIds();
+  const q = query.trim().toLowerCase();
+  const rows = DATA.players.filter(p => {
+    if (hideSold && gone.has(p.id)) return false;
+    if (filterPos && p.pos !== filterPos) return false;
+    if (q && !p.name.toLowerCase().includes(q) && !p.team.toLowerCase().includes(q)) return false;
+    return true;
+  }).slice(0, 120);
+
+  el("board").innerHTML = rows.map((p, i) => {
+    const sold = gone.has(p.id);
+    const now = sold ? null : priceOf(p);
+    return `<tr data-id="${p.id}" class="${selected === p.id ? "sel" : ""}">
+      <td class="muted mono c-hide-sm">${i + 1}</td>
+      <td class="col-name"><span class="pname">${p.name}</span><span class="pteam">${p.team}</span></td>
+      <td class="col-pos"><span class="pos ${p.pos}">${p.pos}</span></td>
+      <td class="mono">${Math.round(p.pts)}</td>
+      <td class="mono muted c-hide-sm">${Math.round(p.bonus / p.pts * 100)}%</td>
+      <td class="mono muted c-hide-sm">${Math.round(p.vor)}</td>
+      <td class="mono muted c-hide-sm">${money(p.val)}</td>
+      <td class="money">${sold ? '<span class="muted">sold</span>' : money(now)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderDetail() {
+  const d = el("detail");
+  if (!selected) { d.className = "detail"; d.innerHTML = ""; return; }
+  const p = P.get(selected);
+  const sold = soldIds().has(p.id);
+  d.className = "detail on";
+  if (sold) {
+    const s = sales.find(x => x.id === p.id);
+    d.innerHTML = `<div class="detail-top"><span class="detail-name">${p.name}</span>
+      <span class="pos ${p.pos}">${p.pos}</span>
+      <span class="muted">already sold to ${s.team} for ${money(s.price)}</span></div>`;
+    return;
+  }
+  const mb = maxBid(p);
+  const now = priceOf(p);
+  const cap = hardCap();
+  d.innerHTML = `
+    <div class="detail-top">
+      <span class="detail-name">${p.name}</span>
+      <span class="pos ${p.pos}">${p.pos}</span>
+      <span class="muted">${p.team} · ${Math.round(p.pts)} pts · ceiling ${Math.round(p.ceil)}</span>
+    </div>
+    <div class="maxbid">
+      <div><div class="lbl">Your walk-away price</div><div class="num">${money(mb)}</div></div>
+      <div class="facts">
+        <div><div class="lbl">Market now</div><div class="mono">${money(now)}</div></div>
+        <div><div class="lbl">Pre-draft list</div><div class="mono">${money(p.val)}</div></div>
+        <div><div class="lbl">Wallet allows</div><div class="mono">${money(cap)}</div></div>
+      </div>
+    </div>
+    ${mb <= L.minBid ? '<p class="warn">Not worth a bid from you at these prices — the money buys more elsewhere.</p>' : ""}
+    <div class="sale">
+      <input type="number" id="price" min="${L.minBid}" step="1" placeholder="price" value="${Math.round(now)}">
+      <button class="btn btn-primary" id="buy">You won it</button>
+      <input type="text" id="who" placeholder="team" value="">
+      <button class="btn" id="sold">Sold to them</button>
+    </div>`;
+
+  el("buy").onclick = () => {
+    const v = Number(el("price").value);
+    if (!(v >= L.minBid)) return;
+    if (v > hardCap()) { alert(`You can only bid ${money(hardCap())} and still fill ${myOpen()} spots.`); return; }
+    recordSale(p.id, v, MYTEAM);
+  };
+  el("sold").onclick = () => {
+    const v = Number(el("price").value);
+    if (!(v >= L.minBid)) return;
+    recordSale(p.id, v, (el("who").value || "").trim() || "other");
+  };
+}
+
+function renderMine() {
+  const roster = myRoster();
+  const { slots, pts } = bestLineup(roster);
+  el("lineup-pts").textContent = Math.round(pts) + " pts";
+  const priceById = new Map(mySales().map(s => [s.id, s.price]));
+  el("myslots").innerHTML = slots.map(s => {
+    const g = GROUPS[s.gi];
+    const scarce = g.positions.includes("QB") ? " sf" : "";
+    if (!s.p) return `<div class="slot empty${scarce}"><span class="lbl">${g.name}</span>
+      <span class="who">—</span></div>`;
+    return `<div class="slot${scarce}"><span class="lbl">${g.name}</span>
+      <span class="who">${s.p.name} <span class="pteam">${s.p.pos}</span></span>
+      <span class="cost">${money(priceById.get(s.p.id) || 0)}</span></div>`;
+  }).join("");
+
+  const starting = new Set(slots.filter(s => s.p).map(s => s.p.id));
+  const bench = roster.filter(p => !starting.has(p.id));
+  el("mybench").innerHTML = bench.length
+    ? bench.map(p => `<div class="row"><span class="who">${p.name}
+        <span class="pteam">${p.pos}</span></span>
+        <span class="cost mono">${money(priceById.get(p.id) || 0)}</span></div>`).join("")
+    : `<div class="empty-note">${L.rosterSize - L.starters} spots, all worth a minimum bid.</div>`;
+}
+
+function renderTeams() {
+  const names = [MYTEAM, ...[...new Set(sales.map(s => s.team))].filter(t => t !== MYTEAM)];
+  el("teams").innerHTML = names.map(t => {
+    const own = sales.filter(s => s.team === t);
+    const spent = own.reduce((a, s) => a + s.price, 0);
+    const left = L.budget - spent;
+    const open = L.rosterSize - own.length;
+    const cap = open > 0 ? left - (open - 1) * L.minBid : 0;
+    return `<div class="team-row"><span class="who">${t === MYTEAM ? "<b>you</b>" : t}</span>
+      <span class="n">${own.length}/${L.rosterSize}</span>
+      <span class="left">${money(left)} left</span>
+      <span class="max">${money(cap)} max</span></div>`;
+  }).join("");
+}
+
+function renderLog() {
+  if (!sales.length) { el("log").innerHTML = `<div class="empty-note">Nothing sold yet.</div>`; return; }
+  el("log").innerHTML = [...sales].reverse().map(s => {
+    const p = P.get(s.id);
+    const diff = s.price - p.val;
+    const tag = Math.abs(diff) < p.val * 0.15 ? ""
+      : `<span class="tag ${diff > 0 ? "bad" : "good"}">${diff > 0 ? "over" : "under"} ${money(Math.abs(diff))}</span>`;
+    return `<div class="row"><span class="who">${p.name} <span class="pteam">${p.pos}</span></span>
+      ${tag}<span class="cost">${s.team}</span><span class="money">${money(s.price)}</span></div>`;
+  }).join("");
+}
+
+/* ---------------- wiring ---------------- */
+el("posfilter").innerHTML = ["QB", "RB", "WR", "TE"]
+  .map(p => `<button class="chip" data-pos="${p}" aria-pressed="false">${p}</button>`).join("");
+el("posfilter").onclick = e => {
+  const b = e.target.closest("[data-pos]"); if (!b) return;
+  filterPos = filterPos === b.dataset.pos ? null : b.dataset.pos;
+  [...el("posfilter").children].forEach(c =>
+    c.setAttribute("aria-pressed", String(c.dataset.pos === filterPos)));
+  render();
+};
+el("hidesold").onclick = () => {
+  hideSold = !hideSold;
+  el("hidesold").setAttribute("aria-pressed", String(hideSold));
+  render();
+};
+el("q").oninput = e => { query = e.target.value; render(); };
+el("board").onclick = e => {
+  const tr = e.target.closest("tr[data-id]"); if (!tr) return;
+  selected = selected === tr.dataset.id ? null : tr.dataset.id;
+  render();
+};
+el("undo").onclick = undo;
+el("reset").onclick = () => {
+  if (sales.length && !confirm("Clear every sale and start the draft over?")) return;
+  sales = []; save(); selected = null; render();
+};
+
+el("footnote").textContent =
+  `${L.name} · ${L.teams} teams · ${money(L.budget)} each · ${L.rosterSize}-man rosters · ` +
+  `${GROUPS.map(g => g.count + "x " + g.name).join(", ")}. ` +
+  `Prices reprice after every sale against the money still in the room. ` +
+  `Projections are illustrative sample data — rebuild with your own before drafting. ` +
+  `Your draft is saved in this browser only.`;
+
+load();
+render();
+</script>
