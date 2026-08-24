@@ -109,14 +109,17 @@ Brock Bowers  (TE - LV)
   PROJECTION          608.1   (35.8/gm)
 ```
 
-### One ambiguity, flagged
+### Play bonuses are per play
 
-The graphic reads "+10 PT for 40+ YARD RUSHING PLAYS" — plural. This tool
-assumes every qualifying play scores. If your league instead pays it once per
-game, set `play_bonus_once_per_game: true` in the config and the model caps
-expected counts at the probability of at least one such play per game. It
-moves top-end valuations by a few percent. **Worth confirming against the
-official rules before you draft.**
+Confirmed against the SFB16 rules: a player with three 40-yard runs in a game
+scores the bonus three times. That is what the tool does by default, and it is
+why explosiveness is priced as heavily as it is here — a receiver with twenty
+catches of 20+ yards banks 200 points from that bonus alone.
+
+For other leagues that pay the bonus at most once per game, setting
+`play_bonus_once_per_game: true` models per-game occurrences as Poisson and
+counts only the probability of at least one. It lowers top-end valuations by a
+few percent.
 
 ## From points to dollars
 
@@ -238,7 +241,8 @@ is a conventional PPR league for comparison. Copy either and pass
 - `upside_weight` — blend median and ceiling when pricing. SFB is a tournament
   with one overall winner, so pricing pure medians is arguably the wrong game.
   Raise toward 1.0 to pay up for ceiling.
-- `play_bonus_once_per_game` — the rules ambiguity above
+- `play_bonus_once_per_game` — for leagues that cap big-play bonuses per game
+  (SFB16 does not; see above)
 - everything in `scoring` and `bonuses`
 
 ## What to be skeptical of

@@ -128,11 +128,10 @@ class BonusRules:
     rec_20_ypr_base: float = 12.0
     rec_20_elasticity: float = 1.3
 
-    # The SFB16 graphic reads "+10 PT for 40+ YARD RUSHING PLAYS" (plural),
-    # which we take to mean every qualifying play scores. If your league
-    # instead pays the bonus once per game regardless of how many big plays
-    # a player has, set this true and the model caps expected counts at the
-    # probability of at least one such play per game.
+    # SFB16 scores these per play: three 40-yard runs in a game is three
+    # bonuses. Leagues that instead pay the bonus once per game regardless of
+    # how many big plays a player has should set this true, which caps expected
+    # counts at the probability of at least one such play per game.
     play_bonus_once_per_game: bool = False
 
 
