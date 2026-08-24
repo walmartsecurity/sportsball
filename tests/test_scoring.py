@@ -155,3 +155,106 @@ def test_points_are_base_plus_bonus(scored):
 
 def test_players_with_no_stats_score_nothing(sfb16):
     assert score_player(make("WR"), sfb16).points == pytest.approx(0.0)
+
+
+# -- fitted distribution model --------------------------------------------
+
+
+def test_gamma_tail_is_a_probability():
+    from sportsball.bonuses import gamma_tail
+
+    for threshold in (10, 50, 100, 300, 1000):
+        assert 0.0 <= gamma_tail(100.0, 0.6, threshold) <= 1.0
+
+
+def test_gamma_tail_decreases_with_threshold():
+    from sportsball.bonuses import gamma_tail
+
+    tails = [gamma_tail(100.0, 0.6, t) for t in (50, 100, 200, 400)]
+    assert tails == sorted(tails, reverse=True)
+
+
+def test_gamma_has_a_lighter_upper_tail_than_lognormal():
+    """The reason the model switched: lognormal over-predicted 200-yard games."""
+    from sportsball.bonuses import gamma_tail
+
+    assert gamma_tail(80.0, 0.65, 200.0) < lognormal_tail(80.0, 0.65, 200.0)
+
+
+def test_gamma_matches_its_mean():
+    """Sanity check on the incomplete gamma implementation."""
+    from sportsball.bonuses import gamma_tail
+
+    # For a gamma, P(X >= mean) sits just under a half for moderate spread.
+    assert 0.35 < gamma_tail(100.0, 0.6, 100.0) < 0.5
+
+
+def test_variance_shrinks_as_volume_rises(sfb16):
+    """Fitted from play-by-play: a 97 yd/gm back is far steadier than a 33."""
+    from sportsball.bonuses import volume_adjusted_cv
+
+    rules = sfb16.bonuses
+    args = (rules.scrimmage_cv["RB"], rules.scrimmage_cv_ref["RB"],
+            rules.scrimmage_cv_slope["RB"], rules.cv_floor, rules.cv_ceiling)
+    low = volume_adjusted_cv(33.0, *args)
+    high = volume_adjusted_cv(97.0, *args)
+    assert low > high
+    assert 0.75 < low < 0.95
+    assert 0.35 < high < 0.50
+
+
+def test_variance_is_clamped_at_the_extremes(sfb16):
+    from sportsball.bonuses import volume_adjusted_cv
+
+    rules = sfb16.bonuses
+    args = (rules.scrimmage_cv["RB"], rules.scrimmage_cv_ref["RB"],
+            rules.scrimmage_cv_slope["RB"], rules.cv_floor, rules.cv_ceiling)
+    assert volume_adjusted_cv(0.5, *args) <= rules.cv_ceiling
+    assert volume_adjusted_cv(5000.0, *args) >= rules.cv_floor
+
+
+def test_quarterback_big_runs_are_discounted(sfb16):
+    """QB yards per carry comes from scrambles, not breakaway speed."""
+    qb = make("QB", rush_att=140, rush_yds=800)
+    rb = make("RB", rush_att=140, rush_yds=800)
+    qb_parts = project_bonuses(qb, sfb16.bonuses)[1]
+    rb_parts = project_bonuses(rb, sfb16.bonuses)[1]
+    assert qb_parts["rush_40_plays"] < rb_parts["rush_40_plays"]
+    ratio = qb_parts["rush_40_plays"] / rb_parts["rush_40_plays"]
+    assert ratio == pytest.approx(sfb16.bonuses.rush_40_position_multiplier["QB"])
+
+
+def test_distribution_is_configurable(sfb16):
+    """Both shapes stay available; gamma is the fitted default."""
+    assert sfb16.bonuses.distribution == "gamma"
+    wr = make("WR", receptions=90, rec_yds=1300, games=17)
+    gamma_pts, _ = project_bonuses(wr, sfb16.bonuses)
+    logn_pts, _ = project_bonuses(
+        wr, dataclasses.replace(sfb16.bonuses, distribution="lognormal")
+    )
+    assert gamma_pts != logn_pts
+    assert gamma_pts > 0 and logn_pts > 0
+
+
+# -- fitted first down rates ----------------------------------------------
+
+
+def test_receivers_convert_more_first_downs_per_catch_than_tight_ends(sfb16):
+    """Fitted from play-by-play, and the opposite of the obvious guess: wideouts
+    catch the ball further downfield, which narrows the SFB16 tight end edge."""
+    rates = sfb16.first_downs.per_reception
+    assert rates["WR"] > rates["TE"] > rates["RB"]
+
+
+def test_touchdowns_are_not_double_counted(sfb16):
+    """The fitted rates already include scores, so the separate adjustment is
+    off by default; turning it on can only inflate first downs."""
+    assert sfb16.first_downs.touchdowns_count_as_first_down is False
+    scorer = make("WR", receptions=60, rec_td=12)
+    _, plain = estimate_first_downs(scorer, sfb16.first_downs)
+    _, doubled = estimate_first_downs(
+        scorer, dataclasses.replace(
+            sfb16.first_downs, touchdowns_count_as_first_down=True)
+    )
+    assert doubled > plain
+    assert plain == pytest.approx(60 * sfb16.first_downs.per_reception["WR"])

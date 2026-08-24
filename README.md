@@ -41,21 +41,24 @@ what one catch is worth:
 
 | position | per catch | per first down | total per catch |
 |----------|-----------|----------------|-----------------|
-| TE       | 1.50      | 0.87           | **2.37**        |
-| WR       | 0.50      | 0.26           | 0.76            |
-| RB       | 0.50      | 0.19           | 0.69            |
+| TE       | 1.50      | 0.79           | **2.29**        |
+| WR       | 0.50      | 0.30           | 0.80            |
+| RB       | 0.50      | 0.17           | 0.67            |
 
-A tight end's reception is worth roughly three times a wide receiver's. This
-is not a rounding error, and it drives the tool's most striking output: at list
-prices it wants to start a lot of tight ends. That is a real property of
-TE-premium formats with open flex slots, not a modelling artifact — but see
-[the caveats](#what-to-be-skeptical-of).
+A tight end's reception is worth roughly **2.9x** a wide receiver's on the base
+scoring. That is enormous — but it does not settle the question, because the
+20+ yard reception bonus pushes hard the other way: receivers catch the ball
+further downfield and bank far more of those. The two effects very nearly
+cancel. Forcing the optimizer off receivers entirely costs 0.9% of roster
+value; it just rebuilds around tight ends. The practical read is that
+TE-heavy and WR-heavy builds are interchangeable in SFB16, so take whichever
+the room is underpricing.
 
 **First downs are scored but never projected.** No public projection source
 publishes first downs, and they are worth up to 1.5 points each here. The tool
-estimates them from receptions and carries at positional rates, counting
-touchdowns as conversions. Supply real `rec_first_downs` / `rush_first_downs`
-columns and it uses those instead.
+estimates them from receptions and carries at rates fitted from play-by-play
+(0.60 per catch for a receiver, 0.53 for a tight end, 0.34 for a back). Supply
+real `rec_first_downs` / `rush_first_downs` columns and it uses those instead.
 
 **Passing touchdowns are worth six**, not four, which moves quarterbacks up
 substantially — though only two can start, which caps how much that matters.
@@ -82,31 +85,45 @@ They also need two different models, because they behave differently:
 
 **Game bonuses reward variance, not volume.** A back who runs for 100 yards
 eight times and 20 yards nine times earns 80 bonus points. One who grinds out
-65 every single week, on nearly identical season totals, earns none. So single
-game yardage is modelled as a lognormal distribution around the projected
-per-game mean, with a positional coefficient of variation, and the tool
-integrates the tail above each threshold. Boom/bust players are correctly
-priced *up*.
+65 every single week, on nearly identical season totals, earns none. Single
+game yardage is modelled as a **gamma** distribution around the projected
+per-game mean, and the tool integrates the tail above each threshold.
+
+The spread is not a constant. Fitted against five seasons of play-by-play, a
+player's game-to-game coefficient of variation falls sharply as volume rises:
+
+| running backs | yards/game | observed CV |
+|---|---|---|
+| bottom quartile | 33 | 0.83 |
+| second | 50 | 0.69 |
+| third | 72 | 0.52 |
+| top quartile | 97 | 0.43 |
+
+Holding it constant — as the first version of this model did — badly overstates
+big games for exactly the workhorses who live near the 200-yard threshold.
 
 **Play bonuses reward efficiency.** These fire on every qualifying play, so
 expected value is linear in volume — but the *rate* scales with yards per
-opportunity, because explosive plays are exactly what pulls a yards-per-carry
-average above league norm. A back at 5.2 YPC is credited with more 40-yard runs
-than one at 3.8 on the same carries.
+opportunity, because explosive plays are what pull an average above league
+norm.
 
-Every constant in both models lives in the league config and is meant to be
-re-fit against real data. `sportsball player NAME` breaks down exactly where a
+Every constant in both models is fitted, and lives in the league config so it
+can be re-fitted. `sportsball player NAME` breaks down exactly where a
 projection comes from:
 
 ```
 Brock Bowers  (TE - LV)
+  17 games
   receiving 105 rec, 1200 yds, 8 TD (11.4 Y/R)
-
-  base scoring        423.2
-    rec_20_plays              147.8
-    scrimmage_yardage_games     37.0
-  bonus total         184.8   (30% of projection)
-  PROJECTION          608.1   (35.8/gm)
+  base scoring        409.2
+    rec_20_plays              152.1
+    scrimmage_yardage_games     32.3
+  bonus total         184.4   (31% of projection)
+  PROJECTION          593.6   (34.9/gm)
+  upside case         760.4
+  replacement         254.1
+  value over repl     339.5
+  AUCTION VALUE         $56
 ```
 
 ### Play bonuses are per play
@@ -120,6 +137,85 @@ For other leagues that pay the bonus at most once per game, setting
 `play_bonus_once_per_game: true` models per-game occurrences as Poisson and
 counts only the probability of at least one. It lowers top-end valuations by a
 few percent.
+
+## Where the constants come from
+
+Every rate, elasticity and variance parameter in the bonus and first-down
+models is fitted against [nflverse](https://github.com/nflverse) play-by-play,
+2021-2025 regular season — 236,000 plays. Refit them yourself:
+
+```
+pip install -e '.[fit]'
+python tools/fit_bonus_rates.py --seasons 2021 2022 2023 2024 2025
+```
+
+That prints calibration diagnostics and a YAML fragment to paste into a league
+config. Two methodology choices materially change the answers:
+
+**Big-play rates are fitted against *prior*-season efficiency.** Yards per
+carry is partly *caused by* the 40-yard runs being predicted, so fitting on the
+same season is circular and inflates the efficiency elasticity badly:
+
+| bonus | same-season (circular) | prior-season (used) |
+|---|---|---|
+| 20+ yard receptions | 2.00 | **1.35** |
+| 40+ yard runs | 4.66 | **1.72** |
+| 40+ yard pass plays | 2.85 | **0.58** |
+
+Since the tool is fed a *projection* at prediction time, the lagged fit is the
+one that matches how it is actually used. The difference is not academic — the
+circular rushing elasticity would have credited a 5.5 Y/C back with nearly
+three times the 40-yard runs the honest model gives him.
+
+The payoff is calibration. Against a flat league-average rate, the fitted
+receiving model is dramatically better across the efficiency distribution:
+
+| prior-season Y/R quartile | flat rate error | fitted error |
+|---|---|---|
+| Q1 (low) | +102% | +15% |
+| Q2 | +17% | +0.3% |
+| Q3 | −15% | −8% |
+| Q4 (high) | −27% | +3% |
+
+For 40+ yard pass plays the fitted elasticity is 0.58 ± 0.33 — barely
+distinguishable from no effect, and a flat rate is already well calibrated
+there. Yards per attempt simply does not predict next year's deep completions
+very well, and the model says so rather than pretending otherwise.
+
+**Gamma beats lognormal in the tail.** Checked directly against observed
+threshold games:
+
+| | actual | gamma | lognormal |
+|---|---|---|---|
+| RB 100+ yards | 913 | −7% | −14% |
+| RB 200+ yards | 27 | +39% | +88% |
+| WR 200+ yards | 14 | +88% | +190% |
+| QB 300+ pass yards | 391 | +0.2% | −3% |
+| QB 400+ pass yards | 40 | +20% | +40% |
+
+Both still overshoot the rarest thresholds, but a 200-yard scrimmage game
+happens about once per 40 player-games, so even a large relative error there is
+worth well under a point of season value. The 100-yard threshold, which is
+worth 50-90 points, lands within 7%.
+
+**Two guesses the data overturned.** Wide receivers convert first downs at a
+*higher* rate per catch than tight ends (0.60 against 0.53) — they catch the
+ball further downfield. I had assumed the opposite, and it meaningfully narrows
+the SFB16 tight end edge. And quarterback yards per carry comes from scrambles
+rather than breakaway speed, so the shared rate model over-predicted their
+40-yard runs by roughly a factor of two; they now carry an explicit multiplier.
+
+### How much did fitting change the board?
+
+Honestly, less than the effort suggests — and that is worth stating plainly.
+Across the top 112 players, the median auction value moved **$0.40 (2.7%)**,
+the mean $0.64, the largest single move $4.10 (Lamar Jackson, down, from the
+quarterback rushing correction). Quarterbacks fell about $1.30 on average,
+receivers rose about $0.70.
+
+Prices are relative, so corrections that move a whole position together
+largely cancel in the valuation step. What *did* change materially is roster
+construction — see below.
 
 ## From points to dollars
 
@@ -238,6 +334,7 @@ is a conventional PPR league for comparison. Copy either and pass
 `--league path/to/yours.yaml`. Useful knobs:
 
 - `bench_weight` — what a bench spot is worth relative to a starter (default 0.35)
+- `distribution` — `gamma` (fitted default) or `lognormal` for game thresholds
 - `upside_weight` — blend median and ceiling when pricing. SFB is a tournament
   with one overall winner, so pricing pure medians is arguably the wrong game.
   Raise toward 1.0 to pay up for ceiling.
@@ -254,15 +351,17 @@ Stated plainly, because a tool that hides its assumptions is worse than no tool:
    and the tests have a realistic board. Do not draft off them. They also
    almost certainly overstate tight end depth, which exaggerates the all-TE
    result.
-2. **The bonus rate constants are estimates**, not fits. `pass_40_rate`,
-   `rec_20_rate`, the positional CVs — all are reasoned league-average
-   baselines. They are the single largest source of error in the projections,
-   and they are exposed in config precisely so you can do better.
-3. **The optimizer assumes you can buy at list price.** It will happily plan a
-   roster of eight tight ends. In a real room, if tight ends are this
-   dominant, eleven other managers will bid them up and that roster will not be
-   available. The inflation model tracks that as it happens, but the pre-draft
-   plan is an upper bound, not a script.
+2. **The bonus constants are fitted, but on five seasons of a changing game.**
+   Rates drift: 2025 produced 25% more 40-yard runs than the 2021-2024 fit
+   predicted. The 40+ pass play elasticity (0.58 ± 0.33) is barely significant.
+   Refit annually; the tool is one command.
+3. **Position-heavy builds are near-equivalent, not a recommendation.** Forcing
+   the optimizer off wide receivers entirely costs only **0.9%** of roster
+   value — it simply rebuilds around tight ends. Read the output as "these
+   builds are interchangeable, take whichever the room underprices," not as a
+   plan to corner one position. It also assumes you can buy at list price; in a
+   real room eleven other managers bid too. The inflation model tracks that
+   live, but the pre-draft plan is an upper bound, not a script.
 4. **SFB16 turnover scoring is assumed to be zero.** The published graphic
    lists positive scoring only. Interceptions and lost fumbles are set to 0
    rather than guessed at. Override in config if that is wrong.
@@ -276,9 +375,11 @@ pip install -e '.[dev]'
 pytest
 ```
 
-130 tests covering scoring against hand-computed totals, the lognormal bonus
+140 tests covering scoring against hand-computed totals, the lognormal bonus
 model, exact lineup assignment, replacement derivation, the money identity,
 budget discipline, max-bid economics, draft bookkeeping, and every CLI command.
+The fitting pipeline lives in `tools/fit_bonus_rates.py` and is rerun offline,
+not on import — the runtime package depends on nothing but PyYAML.
 
 Layout:
 
@@ -294,3 +395,5 @@ Layout:
 | `optimize.py` | roster ILP and max bid |
 | `draft.py` | live auction state and inflation |
 | `cli.py` | the commands |
+| `tools/fit_bonus_rates.py` | fits the constants from nflverse play-by-play |
+| `tools/make_sample.py` | regenerates the synthetic sample projections |

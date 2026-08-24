@@ -9,3 +9,4 @@ venv/
 .coverage
 htmlcov/
 *.draft.json
+.nflverse-cache/

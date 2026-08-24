@@ -90,15 +90,18 @@ class BonusRules:
 
     Each bonus is worth ``points`` (10 in SFB16). Two families:
 
-    * **Game bonuses** trigger when a single-game total clears a threshold.
-      Projected from a lognormal model of game-to-game variance, so a
-      boom/bust player earns more here than a metronome with the same total.
+    * **Game bonuses** trigger when a single-game total clears a threshold, so
+      their expected value depends on the whole distribution of single-game
+      outcomes -- a boom/bust player earns more than a metronome with the same
+      season total. Game yardage is modelled as a gamma distribution whose
+      spread shrinks as volume rises.
     * **Play bonuses** trigger on every individual play clearing a threshold,
-      so their expected value is linear in projected volume and efficiency.
+      so expected value is linear in volume, with rates that scale with
+      projected efficiency.
 
-    The rate constants are league-average baselines. They are deliberately
-    exposed as config: they are the biggest modelling assumption in the
-    projection pipeline, and they are worth re-fitting against real data.
+    Defaults are fitted against nflverse play-by-play, 2021-2025 regular
+    season; regenerate with ``tools/fit_bonus_rates.py``. Every constant stays
+    in config because refitting on newer data is expected.
     """
 
     points: float = 10.0
@@ -109,24 +112,56 @@ class BonusRules:
     pass_game_thresholds: tuple[float, ...] = (300.0, 400.0)
     scrimmage_game_thresholds: tuple[float, ...] = (100.0, 200.0)
 
-    # Game-to-game coefficient of variation, by position.
-    pass_yds_cv: float = 0.35
+    # Shape of the single-game distribution. Gamma fits the observed tail
+    # markedly better than lognormal, which over-predicted 200-yard games by
+    # 88-292% depending on position.
+    distribution: str = "gamma"
+
+    # Game-to-game spread. A player's coefficient of variation is not constant:
+    # a 97-yards-per-game back is far steadier than a 33-yards-per-game back
+    # (0.43 against 0.83). It is modelled as
+    #     cv = scrimmage_cv * (yards_per_game / scrimmage_cv_ref) ** slope
     scrimmage_cv: Mapping[str, float] = field(
-        default_factory=lambda: {"QB": 0.80, "RB": 0.55, "WR": 0.70, "TE": 0.70}
+        default_factory=lambda: {"QB": 0.648, "RB": 0.555, "WR": 0.627, "TE": 0.641}
     )
+    scrimmage_cv_ref: Mapping[str, float] = field(
+        default_factory=lambda: {"QB": 34.9, "RB": 62.3, "WR": 47.0, "TE": 37.0}
+    )
+    scrimmage_cv_slope: Mapping[str, float] = field(
+        default_factory=lambda: {"QB": -0.391, "RB": -0.588, "WR": -0.398, "TE": -0.364}
+    )
+    pass_yds_cv: float = 0.288
+    pass_yds_cv_ref: float = 231.9
+    pass_yds_cv_slope: float = -0.802
 
-    # Big-play rates, expressed per opportunity at league-average efficiency.
-    pass_40_rate: float = 0.016      # per pass attempt
-    pass_40_ypa_base: float = 7.0
-    pass_40_elasticity: float = 1.5
+    # Guard rails on the extrapolated coefficient of variation.
+    cv_floor: float = 0.15
+    cv_ceiling: float = 1.50
 
-    rush_40_rate: float = 0.008      # per carry
-    rush_40_ypc_base: float = 4.3
-    rush_40_elasticity: float = 2.0
+    # Big-play rates, per opportunity at league-average efficiency. The
+    # elasticities are fitted against *prior* season efficiency: yards per
+    # carry is partly caused by the 40-yard runs being predicted, so a
+    # same-season fit is circular and inflates them badly (4.66 against 1.72
+    # for rushing). Prior-season fits match how the tool is used, since it is
+    # fed a projection.
+    pass_40_rate: float = 0.01326      # per pass attempt
+    pass_40_ypa_base: float = 6.592
+    pass_40_elasticity: float = 0.579
 
-    rec_20_rate: float = 0.150       # per reception
-    rec_20_ypr_base: float = 12.0
-    rec_20_elasticity: float = 1.3
+    rush_40_rate: float = 0.00473      # per carry
+    rush_40_ypc_base: float = 4.323
+    rush_40_elasticity: float = 1.724
+
+    rec_20_rate: float = 0.14017       # per reception
+    rec_20_ypr_base: float = 11.153
+    rec_20_elasticity: float = 1.354
+
+    # Quarterback yards per carry comes from scrambles rather than breakaway
+    # speed, so the shared rate model over-predicts their 40-yard runs by
+    # roughly a factor of two.
+    rush_40_position_multiplier: Mapping[str, float] = field(
+        default_factory=lambda: {"QB": 0.49}
+    )
 
     # SFB16 scores these per play: three 40-yard runs in a game is three
     # bonuses. Leagues that instead pay the bonus once per game regardless of
@@ -139,17 +174,24 @@ class BonusRules:
 class FirstDownModel:
     """First downs are rarely present in public projections, so estimate them.
 
-    Rates are first downs per opportunity, by position. A rushing or receiving
-    touchdown is also a first down, so touchdowns are added on top.
+    Rates are first downs per opportunity, fitted against nflverse play-by-play
+    2021-2025. Note that receivers convert first downs at a *higher* rate per
+    catch than tight ends (0.60 against 0.53) because they catch the ball
+    further downfield -- the opposite of what the position premium might
+    suggest, and it meaningfully narrows the tight end advantage in SFB16.
+
+    Touchdowns are already counted as first downs in the source data, so
+    ``touchdowns_count_as_first_down`` defaults to false; turning it on with
+    fitted rates would double-count scores.
     """
 
     per_reception: Mapping[str, float] = field(
-        default_factory=lambda: {"QB": 0.50, "RB": 0.38, "WR": 0.52, "TE": 0.58}
+        default_factory=lambda: {"QB": 0.50, "RB": 0.336, "WR": 0.602, "TE": 0.529}
     )
     per_rush: Mapping[str, float] = field(
-        default_factory=lambda: {"QB": 0.30, "RB": 0.22, "WR": 0.25, "TE": 0.25}
+        default_factory=lambda: {"QB": 0.365, "RB": 0.225, "WR": 0.266, "TE": 0.266}
     )
-    touchdowns_count_as_first_down: bool = True
+    touchdowns_count_as_first_down: bool = False
 
 
 @dataclass(frozen=True)

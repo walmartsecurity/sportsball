@@ -14,6 +14,9 @@ dependencies = [
 
 [project.optional-dependencies]
 solver = ["PuLP>=2.7"]
+# Only needed to re-fit the bonus constants from play-by-play; the runtime
+# package needs nothing beyond PyYAML.
+fit = ["pandas>=2.0", "numpy>=1.24", "pyarrow>=12"]
 dev = ["pytest>=7", "PuLP>=2.7"]
 
 [project.scripts]

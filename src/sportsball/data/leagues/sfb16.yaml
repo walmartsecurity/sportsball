@@ -52,6 +52,12 @@ bonuses:
   points: 10
   pass_game_thresholds: [300, 400]
   scrimmage_game_thresholds: [100, 200]
+  # SFB16 pays these per play: three 40-yard runs in a game is three bonuses.
+  play_bonus_once_per_game: false
+  # The rate, variance and distribution constants come from the package
+  # defaults, which are fitted against nflverse play-by-play 2021-2025.
+  # Refit with: python tools/fit_bonus_rates.py --emit fitted.yaml
+  # and paste the result here to override any of them.
 
 # Bench spots are insurance and upside, not points. Tune to taste.
 bench_weight: 0.35
