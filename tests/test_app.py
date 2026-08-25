@@ -685,3 +685,22 @@ def test_clearing_a_seeded_standing_bid_leaves_him_unsold(seeded_app, tmp_path):
                               "bids": ["ceedee-lamb-wr"]}, tmp_path)
     assert out["bids"][0]["open"] is False
     assert out["bids"][0]["now"] is not None
+
+
+def test_the_app_never_calls_a_browser_modal(app):
+    """A published artifact runs sandboxed without allow-modals.
+
+    confirm() returns false there and alert() is swallowed, both without an
+    error, so a handler guarded by one silently does nothing. Reset was broken
+    this way. Anything that needs an answer has to ask inside the page.
+    """
+    import re
+
+    source = app.read_text()
+    # Strip comments first, or this trips over the notes explaining the rule.
+    code = re.sub(r"/\*.*?\*/", "", source, flags=re.S)
+    code = re.sub(r"(?m)^\s*//.*$", "", code)
+    code = re.sub(r"\s//[^\n\"\']*$", "", code, flags=re.M)
+    banned = [m.group(0) for m in
+              re.finditer(r"(?<![\w.])(?:window\.)?(confirm|alert|prompt)\s*\(", code)]
+    assert banned == [], f"browser modal in the app: {banned}"

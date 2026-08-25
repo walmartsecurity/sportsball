@@ -157,6 +157,8 @@ button { font: inherit; cursor: pointer; }
 /* .chip[aria-pressed="true"] flips the label to the page background, which is
    right for a filled chip and wrong for these -- they stay outlined in their
    own colour, so they have to out-rank it rather than tie. */
+.btn.arm { background: var(--bad); border-color: var(--bad); color: var(--ground); font-weight: 600; }
+#saywhy:empty { display: none; }
 .chip.legend[aria-pressed="true"] { background: transparent; border-color: currentColor; color: var(--pc); }
 .chip.legend[aria-pressed="false"] { opacity: .45; color: var(--pc); }
 
@@ -1097,6 +1099,7 @@ function renderDetail() {
         .map(t => `<option value="${t}">${t}</option>`).join("")}</select>
       <button class="btn" id="sold">Sold to them</button>
     </div>
+    <p class="warn" id="saywhy"></p>
     <div class="sale" style="margin-top:8px">
       <button class="btn" id="onblock">${live ? "Update standing bid" : "On the block now"}</button>
       <button class="btn" id="expect">Expect this price</button>
@@ -1110,7 +1113,13 @@ function renderDetail() {
   el("buy").onclick = () => {
     const v = Number(el("price").value);
     if (!(v >= L.minBid)) return;
-    if (v > hardCap()) { alert(`You can only bid ${money(hardCap())} and still fill ${myOpen()} spots.`); return; }
+    if (v > hardCap()) {
+      // alert() is swallowed in a sandboxed artifact, so say it in the page.
+      el("saywhy").textContent =
+        `${money(v)} leaves you short: ${money(hardCap())} is the most you can `
+        + `bid and still fill ${myOpen()} spots at ${money(L.minBid)} each.`;
+      return;
+    }
     recordSale(p.id, v, MYTEAM);
   };
   el("sold").onclick = () => {
@@ -1450,21 +1459,40 @@ el("chart-depth").addEventListener("click", ev => {
 addEventListener("resize", () => { if (chartHover) renderChart(); });
 
 el("undo").onclick = undo;
+/* Reset asks first, in the page. It used to call confirm(), which a published
+   artifact runs sandboxed without allow-modals: the dialog never appears and
+   the call returns false, so the button silently did nothing. A second click
+   is the confirmation instead, and it arms for a few seconds only. */
+let resetArmed = 0;
 el("reset").onclick = () => {
+  const button = el("reset");
+  if (!sales.length || Date.now() < resetArmed) {
+    resetArmed = 0;
+    button.textContent = "Reset draft";
+    button.classList.remove("arm");
+    seedState(); save(); selected = null; render();
+    return;
+  }
+  resetArmed = Date.now() + 4000;
   const seeded = (SEED.sales || []).length;
-  const question = seeded
-    ? `Discard your changes and go back to the ${seeded} sales this board shipped with?`
-    : "Clear every sale and start the draft over?";
-  if (sales.length && !confirm(question)) return;
-  seedState(); save(); selected = null; render();
+  button.textContent = seeded ? `Back to ${seeded} sales?` : "Clear every sale?";
+  button.classList.add("arm");
+  setTimeout(() => {
+    if (Date.now() >= resetArmed) {
+      resetArmed = 0;
+      button.textContent = "Reset draft";
+      button.classList.remove("arm");
+    }
+  }, 4100);
 };
 
 el("footnote").textContent =
   `${L.name} · ${L.teams} teams · ${money(L.budget)} each · ${L.rosterSize}-man rosters · ` +
   `${GROUPS.map(g => g.count + "x " + g.name).join(", ")}. ` +
   `Prices reprice after every sale against the money still in the room. ` +
-  `Projections are modelled from nflverse play-by-play — regenerate them before ` +
-  `you draft, since rosters and depth charts move daily. ` +
+  `Projections come from Sleeper, scored for this league; players Sleeper does ` +
+  `not rank are mapped onto the same scale from nflverse play-by-play. ` +
+  `Refresh them before you draft, since rosters and depth charts move daily. ` +
   `Your draft is saved in this browser only.`;
 
 load();
