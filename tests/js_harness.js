@@ -8,11 +8,12 @@ const script = html.slice(html.indexOf("const DATA = "), html.indexOf("/* ------
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 const engine = new Function(script + `
   return { P, DATA, L, TEAMS: teamList, bestLineup, objective, wouldStart, personalRate, maxBid,
-           priceOf, bidOf, effectivePrice, pctVsValue, budgetOf, playersOf,
+           priceOf, bidOf, bidSource, isUnderBidding, effectivePrice, pctVsValue, budgetOf, playersOf,
            openSlotsOf, maxBidOf, leagueLeft, slotsLeft, targetRoster,
            setExpected: (id, v) => { if (v === null) delete expected[id]; else expected[id] = v; },
            setTeamEdit: (t, f, v) => { (teamEdits[t] = teamEdits[t] || {})[f] = v; },
-           applyToEdit, load, seedState, SEED, suggestions, startableLeft, qbJobsLeft, roomPricing,
+           applyToEdit, load, seedState, SEED,
+           setRoomBid: (id, v) => { roomBids[id] = v; }, suggestions, startableLeft, qbJobsLeft, roomPricing,
            dollarsPerPoint, inflation, recordSale: (id,pr,t)=>{ sales.push({id,price:pr,team:t}); },
            setDPP: () => { DPP = dollarsPerPoint(); },
            state: () => ({ myBudget: myBudget(), myOpen: myOpen(), hardCap: hardCap(),
@@ -28,6 +29,7 @@ for (const [team, edit] of Object.entries(req.teamEdits || {})) {
   for (const [field, value] of Object.entries(edit)) engine.setTeamEdit(team, field, value);
 }
 for (const [id, price] of Object.entries(req.expected || {})) engine.setExpected(id, price);
+for (const [id, price] of Object.entries(req.roomBids || {})) engine.setRoomBid(id, price);
 for (const sale of req.sales || []) {
   engine.recordSale(sale.id, sale.price, sale.team);
   engine.applyToEdit(sale.team, sale.price, 1);
@@ -44,7 +46,8 @@ out.teams = Object.fromEntries(engine.TEAMS().map(t => [t, {
 out.bids = (req.bids || []).map(id => {
   const p = engine.P.get(id);
   return { id, bid: engine.bidOf(p), effective: engine.effectivePrice(p),
-           pct: engine.pctVsValue(p), value: p.val };
+           pct: engine.pctVsValue(p), value: p.val,
+           source: engine.bidSource(p), open: engine.isUnderBidding(p) };
 });
 if (req.plan) {
   const plan = engine.targetRoster();

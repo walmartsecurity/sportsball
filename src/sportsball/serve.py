@@ -93,7 +93,9 @@ class LiveState:
                 read_roster_salaries(payloads.get("rosters")),
                 self.me,
             )
-            self.payload = {"sales": seed["sales"], "teamEdits": seed["teamEdits"],
+            self.payload = {"sales": seed["sales"],
+                            "openBids": seed.get("openBids", {}),
+                            "teamEdits": seed["teamEdits"],
                             "notes": notes + seed_notes}
             self.error = None
         except (MFLError, OSError, ValueError) as exc:

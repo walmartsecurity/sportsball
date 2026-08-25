@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -170,25 +171,86 @@ def read_salary_cap(payload: Any) -> float | None:
     return None
 
 
+# Fields a row might use to say an auction has not finished yet. MFL's slow
+# auction keeps a player open for hours while bids come in, and the shape of
+# this varies; --inspect prints what your league actually sends.
+_END_KEYS = ("bidEnd", "endTime", "auctionEnd", "expires", "closeTime")
+_REMAINING_KEYS = ("timeRemaining", "secondsRemaining")
+_CLOSED_KEYS = ("closed", "isClosed", "complete")
+
+
+def _auction_is_open(row: Mapping, now: float | None = None) -> bool:
+    """Is this player still under bidding rather than sold?
+
+    Getting this wrong in a slow auction is costly in both directions: calling
+    an open auction sold takes a gettable player off the board and records a
+    price that is not final, while calling a closed one open leaves a player
+    you cannot have in the plan. When a row says nothing either way this
+    returns False, because the endpoint is named for results and treating an
+    unknown as sold matches what MFL has always meant by it.
+    """
+    now = time.time() if now is None else now
+
+    for key in _CLOSED_KEYS:
+        if key in row:
+            value = str(row[key]).strip().lower()
+            if value in ("1", "true", "yes", "y"):
+                return False
+            if value in ("0", "false", "no", "n"):
+                return True
+
+    status = str(row.get("status") or "").strip().lower()
+    if status:
+        if status in ("open", "active", "pending", "bidding", "inprogress"):
+            return True
+        if status in ("closed", "complete", "completed", "sold", "final"):
+            return False
+
+    for key in _REMAINING_KEYS:
+        if row.get(key) not in (None, ""):
+            try:
+                return float(row[key]) > 0
+            except ValueError:
+                pass
+
+    for key in _END_KEYS:
+        if row.get(key) not in (None, ""):
+            try:
+                # MFL writes epoch seconds; tolerate milliseconds too.
+                end = float(row[key])
+            except ValueError:
+                continue
+            if end > 1e11:
+                end /= 1000.0
+            return end > now
+
+    return False
+
+
 def read_auction(payload: Any) -> list[dict]:
-    """Completed sales. MFL nests these under one or more auction units."""
+    """Every auction row, marked open or closed.
+
+    MFL nests these under one or more auction units. A row that is still open
+    carries the *current* high bid, not a sale price -- see ``_auction_is_open``.
+    """
     units = listify(dig(payload, "auctionResults", "auctionUnit"))
-    sales = []
+    rows = []
     for unit in units:
         for row in listify(dig(unit, "auction") if isinstance(unit, Mapping) else None):
             if not isinstance(row, Mapping):
                 continue
-            bid = row.get("winningBid") or row.get("bid")
+            bid = row.get("winningBid") or row.get("currentBid") or row.get("bid")
             if row.get("player") is None or bid in (None, ""):
                 continue
             try:
                 price = float(str(bid).replace("$", "").replace(",", ""))
             except ValueError:
                 continue
-            sales.append({"player": str(row["player"]),
-                          "franchise": str(row.get("franchise") or ""),
-                          "price": price})
-    return sales
+            rows.append({"player": str(row["player"]),
+                         "franchise": str(row.get("franchise") or ""),
+                         "price": price,
+                         "open": _auction_is_open(row)})
+    return rows
 
 
 def read_roster_salaries(payload: Any) -> dict[str, float]:
@@ -251,12 +313,17 @@ def build_seed_state(players: dict[str, dict], sales: list[dict],
             return "you"
         return franchises.get(fid, f"Franchise {fid}")
 
-    out_sales, missing = [], 0
+    out_sales, open_bids, missing = [], {}, 0
     spent: dict[str, float] = {}
     for sale in sales:
         meta = players.get(sale["player"])
         if meta is None:
             missing += 1
+            continue
+        if sale.get("open"):
+            # Still gettable. The current high bid is the best estimate of what
+            # it will take, so it rides through as a price rather than a sale.
+            open_bids[player_id_for(meta)] = round(sale["price"])
             continue
         team = team_of(sale["franchise"])
         out_sales.append({"id": player_id_for(meta),
@@ -264,7 +331,9 @@ def build_seed_state(players: dict[str, dict], sales: list[dict],
                           "team": team})
         spent[team] = spent.get(team, 0.0) + sale["price"]
     if missing:
-        notes.append(f"{missing} sales were for players outside QB/RB/WR/TE")
+        notes.append(f"{missing} auctions were for players outside QB/RB/WR/TE")
+    if open_bids:
+        notes.append(f"{len(open_bids)} players still under bidding")
 
     teams: dict[str, dict] = {}
     for fid, name in franchises.items():
@@ -280,6 +349,7 @@ def build_seed_state(players: dict[str, dict], sales: list[dict],
 
     if cap is None:
         notes.append("no salary cap found; team budgets left to the league config")
-    return {"sales": out_sales, "teamEdits": teams, "myTeam": "you"}, notes
+    return ({"sales": out_sales, "openBids": open_bids, "teamEdits": teams,
+             "myTeam": "you"}, notes)
 
 

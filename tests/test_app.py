@@ -448,3 +448,45 @@ def test_an_unseeded_build_still_starts_empty(app, tmp_path):
     out = run_js(app, {"load": True}, tmp_path)
     assert out["state"]["myOpen"] == 20
     assert out["state"]["inflation"] == pytest.approx(1.0, abs=1e-6)
+
+
+# -- players still under bidding -------------------------------------------
+
+
+def test_a_player_under_bidding_stays_on_the_board(app, py_board, tmp_path):
+    """He is not sold: still gettable, and the standing bid is what it takes."""
+    target = py_board.top(4)[3].player.player_id
+    out = run_js(app, {"roomBids": {target: 120}, "bids": [target]}, tmp_path)
+    row = out["bids"][0]
+    assert row["open"] is True
+    assert row["source"] == "open"
+    assert row["bid"] == 120
+    assert row["effective"] == 120
+
+
+def test_the_standing_bid_beats_your_guess(app, py_board, tmp_path):
+    """What the room is actually paying outranks what you typed."""
+    target = py_board.top(4)[3].player.player_id
+    out = run_js(app, {"expected": {target: 500}, "roomBids": {target: 120},
+                       "bids": [target]}, tmp_path)
+    assert out["bids"][0]["bid"] == 120
+
+
+def test_a_sale_beats_a_standing_bid(app, py_board, tmp_path):
+    """Once the gavel falls the sale price is the record."""
+    target = py_board.top(4)[3].player.player_id
+    out = run_js(app, {"roomBids": {target: 120},
+                       "sales": [{"id": target, "price": 140, "team": "Team 2"}],
+                       "bids": [target]}, tmp_path)
+    assert out["bids"][0]["bid"] == 140
+    assert out["bids"][0]["source"] == "sold"
+    assert out["bids"][0]["open"] is False
+
+
+def test_the_plan_can_still_take_a_player_under_bidding(app, py_board, tmp_path):
+    """A cheap standing bid is exactly the sort of thing to chase."""
+    target = py_board.top(4)[3]
+    pid = target.player.player_id
+    out = run_js(app, {"roomBids": {pid: round(target.value * 0.3)},
+                       "plan": True}, tmp_path)
+    assert pid in out["plan"]["additions"]

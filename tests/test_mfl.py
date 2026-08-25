@@ -19,10 +19,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
-from fetch_mfl import (  # noqa: E402
-    MFLError, build_seed, build_url, dig, flip_name, listify, read_auction,
-    read_franchises, read_players, read_projections, read_roster_salaries,
-    read_salary_cap,
+from sportsball.mfl import (  # noqa: E402
+    MFLError, _auction_is_open, build_seed_state as build_seed, build_url, dig,
+    fetch, flip_name, listify, read_auction, read_franchises, read_players,
+    read_projections, read_roster_salaries, read_salary_cap,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mfl"
@@ -71,12 +71,14 @@ def test_franchises_and_cap_are_read(payloads):
     assert read_salary_cap(payloads["league"]) == 1000.0
 
 
-def test_completed_sales_are_read(payloads):
-    sales = read_auction(payloads["auctionResults"])
-    assert len(sales) == 6
-    top = next(s for s in sales if s["player"] == "14801")
+def test_every_auction_row_is_read_and_flagged(payloads):
+    rows = read_auction(payloads["auctionResults"])
+    assert len(rows) == 7
+    assert sum(1 for r in rows if not r["open"]) == 6
+    top = next(r for r in rows if r["player"] == "14801")
     assert top["price"] == 155.0
     assert top["franchise"] == "0004"
+    assert top["open"] is False
 
 
 def test_a_franchise_with_one_player_still_parses(payloads):
@@ -154,8 +156,6 @@ def test_the_url_carries_the_league_and_key():
 
 def test_a_private_league_login_page_is_explained(tmp_path):
     """MFL answers with HTML, not an error code, when credentials are missing."""
-    from fetch_mfl import fetch
-
     page = tmp_path / "login.html"
     page.write_text("<html><body>Please log in</body></html>")
     with pytest.raises(MFLError, match="--apikey"):
@@ -213,3 +213,73 @@ def test_missing_endpoints_do_not_stop_the_import(tmp_path):
     seed = json.loads((tmp_path / "out" / "seed.json").read_text())
     assert seed["sales"] == []
     assert len(seed["teamEdits"]) == 4
+
+
+# -- sold, or still under bidding? -----------------------------------------
+
+
+def test_a_row_that_says_nothing_is_treated_as_sold():
+    """The endpoint is named for results; an unknown defaults to finished."""
+    assert _auction_is_open({"winningBid": "50"}) is False
+
+
+@pytest.mark.parametrize("row,expected", [
+    ({"status": "open"}, True),
+    ({"status": "BIDDING"}, True),
+    ({"status": "closed"}, False),
+    ({"status": "sold"}, False),
+    ({"closed": "0"}, True),
+    ({"closed": "1"}, False),
+    ({"timeRemaining": "3600"}, True),
+    ({"timeRemaining": "0"}, False),
+])
+def test_the_open_flag_is_read_however_it_is_spelled(row, expected):
+    assert _auction_is_open(row) is expected
+
+
+def test_an_end_time_decides_by_the_clock():
+    import time as _time
+
+    now = _time.time()
+    assert _auction_is_open({"bidEnd": str(int(now + 7200))}, now) is True
+    assert _auction_is_open({"bidEnd": str(int(now - 7200))}, now) is False
+    # Some feeds report milliseconds.
+    assert _auction_is_open({"bidEnd": str(int((now + 7200) * 1000))}, now) is True
+
+
+def test_an_open_auction_is_not_a_sale(payloads):
+    """Calling one sold takes a gettable player off the board at a price that
+    is not final."""
+    rows = read_auction(payloads["auctionResults"])
+    still_open = [r for r in rows if r["open"]]
+    assert len(still_open) == 1
+    assert still_open[0]["player"] == "14103"
+    assert still_open[0]["price"] == 115.0
+
+
+def test_open_auctions_ride_through_as_prices_not_sales(payloads):
+    built, notes = build_seed(
+        read_players(payloads["players"]),
+        read_auction(payloads["auctionResults"]),
+        read_franchises(payloads["league"]),
+        read_salary_cap(payloads["league"]),
+        read_roster_salaries(payloads["rosters"]),
+        "Jeffrey Smar",
+    )
+    assert "brock-bowers-te" not in {s["id"] for s in built["sales"]}
+    assert built["openBids"]["brock-bowers-te"] == 115
+    assert any("under bidding" in n for n in notes)
+
+
+def test_an_open_auction_does_not_spend_a_budget(payloads):
+    """The money is only committed when the gavel falls."""
+    built, _ = build_seed(
+        read_players(payloads["players"]),
+        read_auction(payloads["auctionResults"]),
+        read_franchises(payloads["league"]),
+        read_salary_cap(payloads["league"]),
+        {},  # no roster salaries, so budgets fall back to summing sales
+        "Jeffrey Smar",
+    )
+    # Allan Hepworth's only closed sale is Josh Allen at 100.
+    assert built["teamEdits"]["Allan Hepworth"]["budget"] == 900

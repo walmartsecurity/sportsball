@@ -217,6 +217,8 @@ tbody tr.sel { background: var(--accent-soft); }
 .over { color: var(--bad); font-weight: 600; }
 .under { color: var(--good); font-weight: 600; }
 .exp { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin-left: 4px; font-family: "Barlow Condensed", sans-serif; }
+.exp.open { color: var(--accent); font-weight: 700; }
+tbody tr.bidding { box-shadow: inset 3px 0 0 var(--accent); }
 tbody tr.gone .pname { color: var(--ink-3); }
 .sale select { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); color: var(--ink); }
 
@@ -321,6 +323,7 @@ const KEY = "sfb16-auction-room-v1";
 const P = new Map(DATA.players.map(p => [p.id, p]));
 let sales = [];
 let expected = {};      // player id -> what you think he will actually go for
+let roomBids = {};      // player id -> the room's current high bid, still open
 let teamEdits = {};     // team -> { budget, players } typed in directly
 let selected = null;
 let filterPos = null, hideSold = true, query = "";
@@ -364,11 +367,13 @@ function teamList() {
 /* ---------------- persistence ---------------- */
 function save() {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ sales, expected, teamEdits }));
+    localStorage.setItem(KEY,
+      JSON.stringify({ sales, expected, teamEdits, roomBids }));
   } catch (e) {}
 }
 function seedState() {
   sales = (SEED.sales || []).filter(s => P.has(s.id)).map(s => ({ ...s }));
+  roomBids = { ...(SEED.openBids || {}) };
   expected = {};
   teamEdits = JSON.parse(JSON.stringify(SEED.teamEdits || {}));
 }
@@ -383,6 +388,7 @@ function load() {
     sales = (data.sales || []).filter(s => P.has(s.id));
     expected = data.expected || {};
     teamEdits = data.teamEdits || {};
+    roomBids = data.roomBids || {};
   } catch (e) { seedState(); }
 }
 
@@ -436,11 +442,25 @@ let DPP = DATA.dollarsPerPoint;
    room you are actually sitting in. */
 const priceOf = p => Math.max(L.minBid + Math.max(p.vor, 0) * DPP, L.minBid);
 
+/* Three ways a price can be known, most authoritative first: he sold for it,
+   the room is bidding it right now, or you typed a guess. A player under
+   bidding is emphatically not sold -- he is still gettable, and the standing
+   bid is the best estimate of what it will take. */
 function bidOf(p) {
   const sale = sales.find(s => s.id === p.id);
   if (sale) return sale.price;
+  if (roomBids[p.id] !== undefined) return roomBids[p.id];
   const e = expected[p.id];
   return e === undefined || e === null ? null : e;
+}
+
+const isUnderBidding = p => roomBids[p.id] !== undefined && !soldIds().has(p.id);
+
+function bidSource(p) {
+  if (sales.some(s => s.id === p.id)) return "sold";
+  if (roomBids[p.id] !== undefined) return "open";
+  if (expected[p.id] !== undefined) return "exp";
+  return null;
 }
 const effectivePrice = p => bidOf(p) ?? priceOf(p);
 
@@ -704,12 +724,16 @@ async function pollLive() {
   if (!data.live) return;              // served without a league; nothing to sync
 
   const incoming = (data.sales || []).filter(s => P.has(s.id));
+  const incomingOpen = Object.fromEntries(
+    Object.entries(data.openBids || {}).filter(([id]) => P.has(id)));
   const changed = !sameState(incoming, sales)
-    || !sameState(data.teamEdits || {}, teamEdits);
+    || !sameState(data.teamEdits || {}, teamEdits)
+    || !sameState(incomingOpen, roomBids);
   live = { on: true, at: Date.now(), error: data.error || null,
            note: (data.notes || [])[0] || null };
   if (changed) {
     sales = incoming;
+    roomBids = incomingOpen;
     teamEdits = data.teamEdits || {};
     // Anything the room has settled is no longer a guess.
     for (const sale of sales) delete expected[sale.id];
@@ -901,9 +925,12 @@ function renderBoard() {
     const diffCell = diff === null ? '<span class="muted">—</span>'
       : `<span class="${diff > 0.02 ? "over" : diff < -0.02 ? "under" : "muted"}">`
         + `${diff > 0 ? "+" : ""}${Math.round(diff * 100)}%</span>`;
+    const source = bidSource(p);
     const bidCell = bid === null ? '<span class="muted">—</span>'
-      : `${money(bid)}${sold ? "" : '<span class="exp">exp</span>'}`;
-    return `<tr data-id="${p.id}" class="${selected === p.id ? "sel" : ""}${sold ? " gone" : ""}">
+      : `${money(bid)}${source && source !== "sold"
+          ? `<span class="exp ${source}">${source === "open" ? "bidding" : "exp"}</span>`
+          : ""}`;
+    return `<tr data-id="${p.id}" class="${selected === p.id ? "sel" : ""}${sold ? " gone" : ""}${isUnderBidding(p) ? " bidding" : ""}">
       <td class="muted mono c-hide-sm">${i + 1}</td>
       <td class="col-name"><span class="pname">${p.name}</span><span class="pteam">${p.team}</span></td>
       <td class="col-pos"><span class="pos ${p.pos}">${p.pos}</span></td>
@@ -938,6 +965,9 @@ function renderDetail() {
       <span class="detail-name">${p.name}</span>
       <span class="pos ${p.pos}">${p.pos}</span>
       <span class="muted">${p.team} · ${Math.round(p.pts)} pts · ceiling ${Math.round(p.ceil)}</span>
+      ${isUnderBidding(p)
+        ? `<span class="tag bad">under bidding · ${money(roomBids[p.id])}</span>`
+        : ""}
     </div>
     <div class="maxbid">
       <div><div class="lbl">Your walk-away price</div><div class="num">${money(mb)}</div></div>
