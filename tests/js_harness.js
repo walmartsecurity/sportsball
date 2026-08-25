@@ -7,7 +7,12 @@ const script = html.slice(html.indexOf("const DATA = "), html.indexOf("/* ------
 
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 const engine = new Function(script + `
-  return { P, DATA, L, bestLineup, objective, wouldStart, personalRate, maxBid, priceOf, suggestions, startableLeft, qbJobsLeft, roomPricing,
+  return { P, DATA, L, TEAMS: teamList, bestLineup, objective, wouldStart, personalRate, maxBid,
+           priceOf, bidOf, effectivePrice, pctVsValue, budgetOf, playersOf,
+           openSlotsOf, maxBidOf, leagueLeft, slotsLeft, targetRoster,
+           setExpected: (id, v) => { if (v === null) delete expected[id]; else expected[id] = v; },
+           setTeamEdit: (t, f, v) => { (teamEdits[t] = teamEdits[t] || {})[f] = v; },
+           applyToEdit, suggestions, startableLeft, qbJobsLeft, roomPricing,
            dollarsPerPoint, inflation, recordSale: (id,pr,t)=>{ sales.push({id,price:pr,team:t}); },
            setDPP: () => { DPP = dollarsPerPoint(); },
            state: () => ({ myBudget: myBudget(), myOpen: myOpen(), hardCap: hardCap(),
@@ -16,11 +21,37 @@ const engine = new Function(script + `
 
 const req = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 const out = {};
-for (const sale of req.sales || []) engine.recordSale(sale.id, sale.price, sale.team);
+for (const [team, edit] of Object.entries(req.teamEdits || {})) {
+  for (const [field, value] of Object.entries(edit)) engine.setTeamEdit(team, field, value);
+}
+for (const [id, price] of Object.entries(req.expected || {})) engine.setExpected(id, price);
+for (const sale of req.sales || []) {
+  engine.recordSale(sale.id, sale.price, sale.team);
+  engine.applyToEdit(sale.team, sale.price, 1);
+}
 engine.setDPP();
 
 out.state = engine.state();
 out.room = engine.roomPricing();
+out.league = { money: engine.leagueLeft(), slots: engine.slotsLeft() };
+out.teams = Object.fromEntries(engine.TEAMS().map(t => [t, {
+  budget: engine.budgetOf(t), players: engine.playersOf(t),
+  open: engine.openSlotsOf(t), max: engine.maxBidOf(t),
+}]));
+out.bids = (req.bids || []).map(id => {
+  const p = engine.P.get(id);
+  return { id, bid: engine.bidOf(p), effective: engine.effectivePrice(p),
+           pct: engine.pctVsValue(p), value: p.val };
+});
+if (req.plan) {
+  const plan = engine.targetRoster();
+  out.plan = {
+    additions: plan.additions.map(p => p.id),
+    spend: plan.spend,
+    lineupPts: plan.lineup.pts,
+    starters: plan.lineup.slots.filter(s => s.p).map(s => s.p.id),
+  };
+}
 out.prices = (req.prices || []).map(id => engine.priceOf(engine.P.get(id)));
 if (req.lineup) {
   const roster = req.lineup.map(id => engine.P.get(id));

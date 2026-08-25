@@ -191,12 +191,24 @@ tbody tr.sel { background: var(--accent-soft); }
 .target .why { grid-column: 1 / -1; font-size: 12.5px; color: var(--ink-2); line-height: 1.4; }
 .foot { max-width: 1500px; margin: 0 auto; padding: 4px 18px 28px; }
 
-/* Team money rows: fixed columns so the numbers line up. */
-.team-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 12px; align-items: baseline; padding: 5px 8px; border-radius: 5px; }
-.team-row:nth-child(odd) { background: var(--surface-2); }
-.team-row .n { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; color: var(--ink-3); font-size: 13px; }
-.team-row .left { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--ink-2); }
-.team-row .max { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-weight: 600; }
+/* Team money rows: fixed columns so the numbers line up, and every figure is
+   editable because you will not log every sale in a live room. */
+.team-head, .team-row { display: grid; grid-template-columns: 1fr 62px 84px 68px; gap: 8px; align-items: center; padding: 4px 8px; border-radius: 5px; }
+.team-head { padding-bottom: 2px; }
+.team-head .lbl { text-align: right; }
+.team-row:nth-child(even) { background: var(--surface-2); }
+.team-row.me { box-shadow: inset 3px 0 0 var(--accent); }
+.team-row.edited .cell { border-color: var(--accent); }
+.team-row .cell { width: 100%; text-align: right; padding: 4px 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--ink); font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 13px; }
+.team-row .cell:hover { border-color: var(--line); }
+.team-row .cell:focus { border-color: var(--accent); background: var(--ground); outline: none; }
+.team-row .max { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+/* Bid columns */
+.over { color: var(--bad); font-weight: 600; }
+.under { color: var(--good); font-weight: 600; }
+.exp { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin-left: 4px; font-family: "Barlow Condensed", sans-serif; }
+tbody tr.gone .pname { color: var(--ink-3); }
+.sale select { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); color: var(--ink); }
 
 /* On a phone the board has to fit without sideways scrolling: the price you
    are about to bid against is the whole point of looking. */
@@ -209,6 +221,14 @@ tbody tr.sel { background: var(--accent-soft); }
   .bar-actions { margin-left: auto; }
   .wrap { padding: 12px; gap: 12px; }
   .c-hide-sm { display: none; }
+  .team-head, .team-row { grid-template-columns: 1fr 52px 74px 60px; gap: 6px; }
+  /* The bid and its gap from value are the numbers you act on, so they must
+     fit without a sideways scroll. Everything else gives way. */
+  .exp { display: none; }
+  .pteam { display: none; }
+  .col-name { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; }
+  th, td { padding: 7px 4px; font-size: 13px; }
+  .pos { min-width: 26px; padding: 2px 3px; }
   th, td { padding: 7px 5px; }
   .maxbid .num { font-size: 32px; }
   .sale input[type=number], .sale input[type=text] { flex: 1; min-width: 0; }
@@ -239,9 +259,9 @@ tbody tr.sel { background: var(--accent-soft); }
       <div class="scroll">
         <table>
           <thead><tr>
-            <th class="c-hide-sm">#</th><th class="col-name">Player</th><th class="col-pos">Pos</th><th>Pts</th>
-            <th class="c-hide-sm">Bonus</th><th class="c-hide-sm">VOR</th>
-            <th class="c-hide-sm">List</th><th>Now</th>
+            <th class="c-hide-sm">#</th><th class="col-name">Player</th><th class="col-pos">Pos</th>
+            <th class="c-hide-sm">Pts</th><th class="c-hide-sm">VOR</th>
+            <th>Value</th><th class="c-hide-sm">Now</th><th>Bid</th><th>Diff</th>
           </tr></thead>
           <tbody id="board"></tbody>
         </table>
@@ -253,6 +273,10 @@ tbody tr.sel { background: var(--accent-soft); }
     <div class="panel">
       <div class="panel-head"><span class="lbl">Worth bidding on</span></div>
       <div class="panel-body"><div id="targets"></div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="lbl">Roster to aim at</span></div>
+      <div class="panel-body"><div class="slots" id="plan"></div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><span class="lbl">Your lineup</span><span class="lbl" id="lineup-pts" style="margin-left:auto"></span></div>
@@ -285,28 +309,74 @@ const KEY = "sfb16-auction-room-v1";
 
 const P = new Map(DATA.players.map(p => [p.id, p]));
 let sales = [];
+let expected = {};      // player id -> what you think he will actually go for
+let teamEdits = {};     // team -> { budget, players } typed in directly
 let selected = null;
 let filterPos = null, hideSold = true, query = "";
 
+/* Every team in the room, so their money can be tracked whether or not you
+   bothered to record what they bought. The league's own count seeds the list;
+   any other name that turns up in a sale is added, so money recorded against
+   an unexpected team still counts against the league's total instead of
+   quietly disappearing from the pricing. */
+const CONFIGURED_TEAMS = [MYTEAM].concat(
+  Array.from({ length: Math.max(L.teams - 1, 0) }, (_, i) => `Team ${i + 2}`));
+
+function teamList() {
+  const extra = [];
+  for (const sale of sales) {
+    if (!CONFIGURED_TEAMS.includes(sale.team) && !extra.includes(sale.team)) {
+      extra.push(sale.team);
+    }
+  }
+  for (const name of Object.keys(teamEdits)) {
+    if (!CONFIGURED_TEAMS.includes(name) && !extra.includes(name)) extra.push(name);
+  }
+  return CONFIGURED_TEAMS.concat(extra);
+}
+
 /* ---------------- persistence ---------------- */
-function save() { try { localStorage.setItem(KEY, JSON.stringify(sales)); } catch (e) {} }
+function save() {
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ sales, expected, teamEdits }));
+  } catch (e) {}
+}
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) sales = JSON.parse(raw).filter(s => P.has(s.id));
-  } catch (e) { sales = []; }
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    // An older save was a bare array of sales.
+    if (Array.isArray(data)) { sales = data.filter(s => P.has(s.id)); return; }
+    sales = (data.sales || []).filter(s => P.has(s.id));
+    expected = data.expected || {};
+    teamEdits = data.teamEdits || {};
+  } catch (e) { sales = []; expected = {}; teamEdits = {}; }
 }
 
 /* ---------------- derived state ---------------- */
 const soldIds = () => new Set(sales.map(s => s.id));
-const mySales = () => sales.filter(s => s.team === MYTEAM);
-const myRoster = () => mySales().map(s => P.get(s.id));
-const mySpent = () => mySales().reduce((a, s) => a + s.price, 0);
-const myBudget = () => L.budget - mySpent();
-const myOpen = () => L.rosterSize - mySales().length;
-const hardCap = () => myOpen() <= 0 ? 0 : myBudget() - (myOpen() - 1) * L.minBid;
-const leagueLeft = () => L.teams * L.budget - sales.reduce((a, s) => a + s.price, 0);
-const slotsLeft = () => L.teams * L.rosterSize - sales.length;
+const salesFor = team => sales.filter(s => s.team === team);
+const spentBy = team => salesFor(team).reduce((a, s) => a + s.price, 0);
+
+/* A team's money and roster count come from what you recorded, unless you
+   typed something in — you will not catch every sale in a live room, and the
+   pricing model only works if the money in it is right. */
+const budgetOf = team =>
+  teamEdits[team]?.budget ?? (L.budget - spentBy(team));
+const playersOf = team =>
+  teamEdits[team]?.players ?? salesFor(team).length;
+const openSlotsOf = team => Math.max(L.rosterSize - playersOf(team), 0);
+const maxBidOf = team =>
+  openSlotsOf(team) <= 0 ? 0 : budgetOf(team) - (openSlotsOf(team) - 1) * L.minBid;
+
+const myRoster = () => salesFor(MYTEAM).map(s => P.get(s.id));
+const myBudget = () => budgetOf(MYTEAM);
+const myOpen = () => openSlotsOf(MYTEAM);
+const hardCap = () => maxBidOf(MYTEAM);
+
+const leagueLeft = () => teamList().reduce((a, t) => a + budgetOf(t), 0);
+const slotsLeft = () => teamList().reduce((a, t) => a + openSlotsOf(t), 0);
 
 function available() {
   const gone = soldIds();
@@ -322,7 +392,34 @@ function dollarsPerPoint() {
   return vor > 0 ? surplus / vor : 0;
 }
 let DPP = DATA.dollarsPerPoint;
+
+/* ---------------- three different prices ----------------
+   `val` is what the model says a player is worth before the draft starts.
+   `priceOf` is that repriced against the money left in the room right now.
+   `bidOf` is what he actually went for, or what you have typed in as the price
+   you expect him to reach — real information the model does not have.
+
+   The optimizer runs on `effectivePrice`, so entering the bids you expect
+   turns the target roster from a restatement of the model into a plan for the
+   room you are actually sitting in. */
 const priceOf = p => Math.max(L.minBid + Math.max(p.vor, 0) * DPP, L.minBid);
+
+function bidOf(p) {
+  const sale = sales.find(s => s.id === p.id);
+  if (sale) return sale.price;
+  const e = expected[p.id];
+  return e === undefined || e === null ? null : e;
+}
+const effectivePrice = p => bidOf(p) ?? priceOf(p);
+
+/* How far a bid sits from the model's pre-draft value. Positive means the room
+   is paying up. */
+function pctVsValue(p) {
+  const bid = bidOf(p);
+  if (bid === null || !p.val) return null;
+  return bid / p.val - 1;
+}
+
 const inflation = () => DATA.dollarsPerPoint > 0 ? DPP / DATA.dollarsPerPoint : 1;
 
 /* ---------------- lineup ----------------
@@ -548,11 +645,128 @@ function pacing(anyPriceEdge) {
 }
 
 /* ---------------- actions ---------------- */
+/* A team whose money you typed in has that figure adjusted as it buys, so a
+   correction stays correct instead of being overwritten by the next sale. */
+function applyToEdit(team, price, direction) {
+  const edit = teamEdits[team];
+  if (!edit) return;
+  if (edit.budget !== undefined && edit.budget !== null) {
+    edit.budget = Math.max(edit.budget - direction * price, 0);
+  }
+  if (edit.players !== undefined && edit.players !== null) {
+    edit.players = Math.max(edit.players + direction, 0);
+  }
+}
+
 function recordSale(id, price, team) {
   sales.push({ id, price, team });
+  applyToEdit(team, price, 1);
+  delete expected[id];
   save(); selected = null; render();
 }
-function undo() { sales.pop(); save(); selected = null; render(); }
+
+function undo() {
+  const sale = sales.pop();
+  if (sale) applyToEdit(sale.team, sale.price, -1);
+  save(); selected = null; render();
+}
+
+function setExpected(id, price) {
+  if (price === null) delete expected[id]; else expected[id] = price;
+  save(); render();
+}
+
+function setTeamEdit(team, field, value) {
+  const edit = teamEdits[team] || (teamEdits[team] = {});
+  if (value === null || Number.isNaN(value)) {
+    delete edit[field];
+    if (!Object.keys(edit).length) delete teamEdits[team];
+  } else {
+    edit[field] = value;
+  }
+  save(); render();
+}
+
+/* ---------------- the roster to aim at ----------------
+   At list prices this is not a meaningful question: every tier buys value at
+   the same rate, so the optimizer is indifferent and any full roster is as
+   good as another. It becomes meaningful the moment prices stop matching
+   value -- which is exactly what recording sales and typing in expected bids
+   does. Then some players really are bargains, and this is the roster that
+   takes them.
+
+   Marginal-value greedy plus a swap pass, at effective prices, keeping a
+   minimum bid in reserve for every spot still to fill. The CLI runs an exact
+   integer program; on a board this flat the two rarely disagree by more than
+   noise. */
+function targetRoster() {
+  const open = myOpen();
+  const owned = myRoster();
+  if (open <= 0) return { roster: owned, additions: [], spend: 0, lineup: bestLineup(owned) };
+
+  let roster = owned.slice();
+  let left = myBudget();
+  let need = open;
+  const gone = soldIds();
+  let pool = DATA.players.filter(p =>
+    !gone.has(p.id) && !owned.some(o => o.id === p.id));
+  // Anything you cannot afford, and anything a cheaper player already beats,
+  // cannot be in an optimal roster.
+  pool = pool.slice(0, 110).concat(
+    pool.slice(110).filter(p => effectivePrice(p) <= L.minBid * 2));
+
+  const additions = [];
+  let current = objective(roster);
+  while (need > 0) {
+    const affordable = left - (need - 1) * L.minBid;
+    let best = null, bestRatio = -Infinity, bestGain = 0, bestPrice = 0;
+    for (const p of pool) {
+      const price = effectivePrice(p);
+      if (price > affordable) continue;
+      const gain = objective(roster.concat([p])) - current;
+      const ratio = gain / Math.max(price, 1e-9);
+      if (ratio > bestRatio) {
+        bestRatio = ratio; best = p; bestGain = gain; bestPrice = price;
+      }
+    }
+    if (!best) break;
+    roster.push(best); additions.push(best);
+    left -= bestPrice; current += bestGain; need--;
+    pool = pool.filter(p => p.id !== best.id);
+  }
+
+  // Swap pass: greedy fills every spot but leaves money on the table, because
+  // ratio-per-dollar stops favouring upgrades once the lineup is full. Trade
+  // players up while the budget allows -- unspent money scores nothing.
+  let improved = true;
+  let guard = 0;
+  while (improved && guard++ < 40) {
+    improved = false;
+    for (let i = 0; i < additions.length; i++) {
+      const held = additions[i];
+      const heldPrice = effectivePrice(held);
+      for (const candidate of pool) {
+        const price = effectivePrice(candidate);
+        if (price - heldPrice > left) continue;
+        const trial = roster.filter(x => x.id !== held.id).concat([candidate]);
+        const score = objective(trial);
+        if (score > current + 1e-9) {
+          roster = trial;
+          additions[i] = candidate;
+          pool = pool.filter(x => x.id !== candidate.id).concat([held]);
+          left -= price - heldPrice;
+          current = score;
+          improved = true;
+          break;
+        }
+      }
+      if (improved) break;
+    }
+  }
+
+  const spend = additions.reduce((a, p) => a + effectivePrice(p), 0);
+  return { roster, additions, spend, lineup: bestLineup(roster) };
+}
 
 /* ---------------- rendering ---------------- */
 const money = v => "$" + Math.round(v).toLocaleString();
@@ -560,8 +774,8 @@ const el = id => document.getElementById(id);
 
 function render() {
   DPP = dollarsPerPoint();
-  renderBar(); renderTargets(); renderBoard(); renderDetail(); renderMine();
-  renderTeams(); renderLog();
+  renderBar(); renderTargets(); renderBoard(); renderDetail(); renderPlan();
+  renderMine(); renderTeams(); renderLog();
 }
 
 function renderBar() {
@@ -588,16 +802,23 @@ function renderBoard() {
 
   el("board").innerHTML = rows.map((p, i) => {
     const sold = gone.has(p.id);
-    const now = sold ? null : priceOf(p);
-    return `<tr data-id="${p.id}" class="${selected === p.id ? "sel" : ""}">
+    const bid = bidOf(p);
+    const diff = pctVsValue(p);
+    const diffCell = diff === null ? '<span class="muted">—</span>'
+      : `<span class="${diff > 0.02 ? "over" : diff < -0.02 ? "under" : "muted"}">`
+        + `${diff > 0 ? "+" : ""}${Math.round(diff * 100)}%</span>`;
+    const bidCell = bid === null ? '<span class="muted">—</span>'
+      : `${money(bid)}${sold ? "" : '<span class="exp">exp</span>'}`;
+    return `<tr data-id="${p.id}" class="${selected === p.id ? "sel" : ""}${sold ? " gone" : ""}">
       <td class="muted mono c-hide-sm">${i + 1}</td>
       <td class="col-name"><span class="pname">${p.name}</span><span class="pteam">${p.team}</span></td>
       <td class="col-pos"><span class="pos ${p.pos}">${p.pos}</span></td>
-      <td class="mono">${Math.round(p.pts)}</td>
-      <td class="mono muted c-hide-sm">${Math.round(p.bonus / p.pts * 100)}%</td>
+      <td class="mono c-hide-sm">${Math.round(p.pts)}</td>
       <td class="mono muted c-hide-sm">${Math.round(p.vor)}</td>
-      <td class="mono muted c-hide-sm">${money(p.val)}</td>
-      <td class="money">${sold ? '<span class="muted">sold</span>' : money(now)}</td>
+      <td class="mono muted">${money(p.val)}</td>
+      <td class="mono muted c-hide-sm">${sold ? "—" : money(priceOf(p))}</td>
+      <td class="money">${bidCell}</td>
+      <td class="mono">${diffCell}</td>
     </tr>`;
   }).join("");
 }
@@ -634,10 +855,17 @@ function renderDetail() {
     </div>
     ${mb <= L.minBid ? '<p class="warn">Not worth a bid from you at these prices — the money buys more elsewhere.</p>' : ""}
     <div class="sale">
-      <input type="number" id="price" min="${L.minBid}" step="1" placeholder="price" value="${Math.round(now)}">
+      <input type="number" id="price" min="${L.minBid}" step="1" placeholder="price"
+             value="${Math.round(bidOf(p) ?? now)}">
       <button class="btn btn-primary" id="buy">You won it</button>
-      <input type="text" id="who" placeholder="team" value="">
+      <select id="who">${teamList().filter(t => t !== MYTEAM)
+        .map(t => `<option value="${t}">${t}</option>`).join("")}</select>
       <button class="btn" id="sold">Sold to them</button>
+    </div>
+    <div class="sale" style="margin-top:8px">
+      <button class="btn" id="expect">Expect this price</button>
+      ${bidOf(p) !== null ? '<button class="btn" id="clearexp">Clear expected</button>' : ""}
+      <span class="note">Sets what you think he goes for, and plans around it.</span>
     </div>`;
 
   el("buy").onclick = () => {
@@ -649,8 +877,15 @@ function renderDetail() {
   el("sold").onclick = () => {
     const v = Number(el("price").value);
     if (!(v >= L.minBid)) return;
-    recordSale(p.id, v, (el("who").value || "").trim() || "other");
+    recordSale(p.id, v, el("who").value || "other");
   };
+  el("expect").onclick = () => {
+    const v = Number(el("price").value);
+    if (!(v >= L.minBid)) return;
+    setExpected(p.id, v);
+  };
+  const clear = el("clearexp");
+  if (clear) clear.onclick = () => setExpected(p.id, null);
 }
 
 function roomNote() {
@@ -685,11 +920,37 @@ function renderTargets() {
   };
 }
 
+function renderPlan() {
+  const box = el("plan");
+  if (myOpen() <= 0) {
+    box.innerHTML = `<p class="note">Your roster is full.</p>`;
+    return;
+  }
+  const plan = targetRoster();
+  const owned = new Set(myRoster().map(p => p.id));
+  const priced = plan.additions.filter(p => bidOf(p) !== null).length;
+  const rows = plan.lineup.slots.map(sl => {
+    if (!sl.p) return `<div class="slot empty"><span class="lbl">${GROUPS[sl.gi].name}</span>
+      <span class="who">—</span></div>`;
+    const have = owned.has(sl.p.id);
+    return `<div class="slot${GROUPS[sl.gi].positions.includes("QB") ? " sf" : ""}">
+      <span class="lbl">${GROUPS[sl.gi].name}</span>
+      <span class="who">${sl.p.name} <span class="pteam">${sl.p.pos}</span></span>
+      <span class="cost">${have ? "have" : money(effectivePrice(sl.p))}</span></div>`;
+  }).join("");
+  box.innerHTML = rows + `<p class="note">
+    ${money(plan.spend)} for your last ${myOpen()} spot${myOpen() === 1 ? "" : "s"},
+    ${Math.round(plan.lineup.pts)} projected lineup points.
+    ${priced ? `${priced} priced at ${priced === 1 ? "a bid" : "bids"} you entered.`
+             : "Priced at the model's numbers — enter the bids you expect and this replans around them."}
+  </p>`;
+}
+
 function renderMine() {
   const roster = myRoster();
   const { slots, pts } = bestLineup(roster);
   el("lineup-pts").textContent = Math.round(pts) + " pts";
-  const priceById = new Map(mySales().map(s => [s.id, s.price]));
+  const priceById = new Map(salesFor(MYTEAM).map(s => [s.id, s.price]));
   el("myslots").innerHTML = slots.map(s => {
     const g = GROUPS[s.gi];
     const scarce = g.positions.includes("QB") ? " sf" : "";
@@ -710,18 +971,31 @@ function renderMine() {
 }
 
 function renderTeams() {
-  const names = [MYTEAM, ...[...new Set(sales.map(s => s.team))].filter(t => t !== MYTEAM)];
-  el("teams").innerHTML = names.map(t => {
-    const own = sales.filter(s => s.team === t);
-    const spent = own.reduce((a, s) => a + s.price, 0);
-    const left = L.budget - spent;
-    const open = L.rosterSize - own.length;
-    const cap = open > 0 ? left - (open - 1) * L.minBid : 0;
-    return `<div class="team-row"><span class="who">${t === MYTEAM ? "<b>you</b>" : t}</span>
-      <span class="n">${own.length}/${L.rosterSize}</span>
-      <span class="left">${money(left)} left</span>
-      <span class="max">${money(cap)} max</span></div>`;
-  }).join("");
+  el("teams").innerHTML = `
+    <div class="team-head">
+      <span></span><span class="lbl">Players</span><span class="lbl">Money left</span>
+      <span class="lbl">Max bid</span>
+    </div>` + teamList().map(t => {
+    const edited = !!teamEdits[t];
+    return `<div class="team-row${t === MYTEAM ? " me" : ""}${edited ? " edited" : ""}">
+      <span class="who">${t === MYTEAM ? "<b>you</b>" : t}</span>
+      <input class="cell" type="number" min="0" max="${L.rosterSize}" step="1"
+             data-team="${t}" data-field="players" value="${playersOf(t)}">
+      <input class="cell" type="number" min="0" step="1"
+             data-team="${t}" data-field="budget" value="${Math.round(budgetOf(t))}">
+      <span class="max">${money(maxBidOf(t))}</span>
+    </div>`;
+  }).join("") + `<p class="note">Type over any figure to correct it — the room
+    moves faster than you can log every sale, and prices are only right if the
+    money in them is. Corrected teams keep updating as they buy.</p>`;
+
+  el("teams").oninput = e => {
+    const input = e.target.closest("input[data-team]");
+    if (!input) return;
+    const raw = input.value.trim();
+    setTeamEdit(input.dataset.team, input.dataset.field,
+                raw === "" ? null : Number(raw));
+  };
 }
 
 function renderLog() {
@@ -767,7 +1041,8 @@ el("footnote").textContent =
   `${L.name} · ${L.teams} teams · ${money(L.budget)} each · ${L.rosterSize}-man rosters · ` +
   `${GROUPS.map(g => g.count + "x " + g.name).join(", ")}. ` +
   `Prices reprice after every sale against the money still in the room. ` +
-  `Projections are illustrative sample data — rebuild with your own before drafting. ` +
+  `Projections are modelled from nflverse play-by-play — regenerate them before ` +
+  `you draft, since rosters and depth charts move daily. ` +
   `Your draft is saved in this browser only.`;
 
 load();

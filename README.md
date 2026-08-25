@@ -482,10 +482,22 @@ still works in a bare environment.
 ## The draft-room web app
 
 `tools/build_app.py` bakes the board into a single self-contained HTML file —
-no server, no install, works from a phone at the table. Search the board, tap a
-player to see your walk-away price, record who won them and for how much;
-prices reprice after every sale, a panel tracks what is worth bidding on, and
-the draft is saved in the browser.
+no server, no install, works from a phone at the table. The draft is saved in
+the browser.
+
+Four things it does that a cheat sheet cannot:
+
+- **Record what players actually go for**, and see the gap from the model's
+  value as a percentage. Green under, red over.
+- **Enter the bids you expect** on players still on the board. This is the
+  useful one: at list prices the optimizer is indifferent between players, so a
+  target roster is a restatement of the model. Enter real numbers and it
+  becomes a plan for the room you are sitting in.
+- **Correct every team's money and roster count** by typing over it. You will
+  not log every sale in a live room, and prices are only right if the money in
+  them is. A corrected team keeps updating as it buys.
+- **Replan the target roster** against all of the above, then tell you your
+  walk-away price on anyone.
 
 ```
 python tools/build_app.py --projections mine.csv --out app.html

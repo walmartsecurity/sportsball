@@ -223,3 +223,141 @@ def test_endgame_edge_matches_python(app, sfb16, scored, py_board, tmp_path):
     for row in out["suggestions"]:
         if row["id"] in py_bids:
             assert row["max"] == pytest.approx(py_bids[row["id"]], abs=1)
+
+
+# -- live auction values, team money, and the target roster ----------------
+
+
+def test_an_expected_bid_reports_its_gap_from_value(app, py_board, tmp_path):
+    """Type in what you think a player goes for; see how far that is off."""
+    target = py_board.top(1)[0]
+    pid = target.player.player_id
+    bid = round(target.value * 0.6)
+    out = run_js(app, {"expected": {pid: bid}, "bids": [pid]}, tmp_path)
+    row = out["bids"][0]
+    assert row["bid"] == bid
+    assert row["effective"] == bid, "the optimizer must price off the entered bid"
+    assert row["pct"] == pytest.approx(bid / target.value - 1, abs=0.01)
+
+
+def test_a_player_with_no_bid_entered_has_no_gap(app, py_board, tmp_path):
+    pid = py_board.top(1)[0].player.player_id
+    out = run_js(app, {"bids": [pid]}, tmp_path)
+    assert out["bids"][0]["bid"] is None
+    assert out["bids"][0]["pct"] is None
+
+
+def test_a_recorded_sale_is_the_bid(app, py_board, tmp_path):
+    target = py_board.top(1)[0]
+    pid = target.player.player_id
+    sales = [{"id": pid, "price": 500, "team": "Team 2"}]
+    out = run_js(app, {"sales": sales, "bids": [pid]}, tmp_path)
+    assert out["bids"][0]["bid"] == 500
+    assert out["bids"][0]["pct"] == pytest.approx(500 / target.value - 1, abs=0.01)
+
+
+# -- team money ------------------------------------------------------------
+
+
+def test_every_team_in_the_league_is_tracked(app, sfb16, tmp_path):
+    out = run_js(app, {}, tmp_path)
+    assert len(out["teams"]) == sfb16.teams
+    assert out["league"]["money"] == sfb16.total_budget
+    assert out["league"]["slots"] == sfb16.drafted_players
+
+
+def test_typing_in_a_team_budget_moves_the_market(app, py_board, tmp_path):
+    """Money you cannot see still sets prices, so it has to be correctable."""
+    pid = py_board.top(2)[1].player.player_id
+    before = run_js(app, {"bids": [pid]}, tmp_path)
+    after = run_js(app, {"teamEdits": {"Team 2": {"budget": 100},
+                                       "Team 3": {"budget": 100}},
+                         "bids": [pid]}, tmp_path)
+    assert after["league"]["money"] < before["league"]["money"]
+    assert after["bids"][0]["effective"] < before["bids"][0]["effective"]
+
+
+def test_typing_in_a_team_roster_count_changes_the_spots_left(app, sfb16, tmp_path):
+    out = run_js(app, {"teamEdits": {"Team 2": {"players": 10}}}, tmp_path)
+    assert out["teams"]["Team 2"]["players"] == 10
+    assert out["teams"]["Team 2"]["open"] == sfb16.roster_size - 10
+    assert out["league"]["slots"] == sfb16.drafted_players - 10
+
+
+def test_a_corrected_team_keeps_updating_as_it_buys(app, py_board, tmp_path):
+    """A correction should survive the next sale, not be overwritten by it."""
+    pid = py_board.top(3)[2].player.player_id
+    out = run_js(app, {"teamEdits": {"Team 2": {"budget": 500, "players": 3}},
+                       "sales": [{"id": pid, "price": 120, "team": "Team 2"}]},
+                 tmp_path)
+    assert out["teams"]["Team 2"]["budget"] == 380
+    assert out["teams"]["Team 2"]["players"] == 4
+
+
+def test_your_own_budget_can_be_corrected(app, sfb16, tmp_path):
+    out = run_js(app, {"teamEdits": {"you": {"budget": 250, "players": 5}}}, tmp_path)
+    assert out["state"]["myBudget"] == 250
+    assert out["state"]["myOpen"] == sfb16.roster_size - 5
+
+
+# -- the target roster -----------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def studs(py_board):
+    return [v.player.player_id for v in py_board.top(3)]
+
+
+def test_the_plan_fills_the_roster_and_spends_the_budget(app, sfb16, tmp_path):
+    out = run_js(app, {"plan": True}, tmp_path)
+    plan = out["plan"]
+    assert len(plan["additions"]) == sfb16.roster_size
+    assert plan["spend"] <= sfb16.budget + 1e-6
+    # Unspent money scores nothing, so a plan that leaves much behind is wrong.
+    assert plan["spend"] >= sfb16.budget * 0.95
+    assert len(plan["starters"]) == sfb16.starters
+
+
+def test_the_plan_lands_near_the_exact_solver(app, sfb16, py_board, tmp_path):
+    """The app uses greedy plus swaps; the CLI runs an integer program."""
+    from sportsball.optimize import optimize_roster
+
+    out = run_js(app, {"plan": True}, tmp_path)
+    exact = optimize_roster(py_board, sfb16)
+    assert out["plan"]["lineupPts"] >= exact.starter_points * 0.97
+
+
+def test_the_plan_takes_players_you_expect_to_go_cheap(app, py_board, studs,
+                                                       tmp_path):
+    """This is the point of entering bids: it replans around the real room."""
+    values = {v.player.player_id: v.value for v in py_board}
+    cheap = {pid: round(values[pid] * 0.35) for pid in studs}
+    base = run_js(app, {"plan": True}, tmp_path)
+    out = run_js(app, {"expected": cheap, "plan": True}, tmp_path)
+    taken = [pid for pid in studs if pid in out["plan"]["additions"]]
+    assert len(taken) == len(studs)
+    assert out["plan"]["lineupPts"] > base["plan"]["lineupPts"]
+
+
+def test_the_plan_avoids_players_you_expect_to_go_over(app, py_board, studs,
+                                                       tmp_path):
+    values = {v.player.player_id: v.value for v in py_board}
+    dear = {pid: round(values[pid] * 2.5) for pid in studs}
+    out = run_js(app, {"expected": dear, "plan": True}, tmp_path)
+    assert not [pid for pid in studs if pid in out["plan"]["additions"]]
+
+
+def test_the_plan_keeps_players_you_already_bought(app, py_board, tmp_path):
+    pid = py_board.top(1)[0].player.player_id
+    out = run_js(app, {"sales": [{"id": pid, "price": 300, "team": "you"}],
+                       "plan": True}, tmp_path)
+    assert pid in out["plan"]["starters"]
+    assert out["plan"]["spend"] <= out["state"]["myBudget"] + 1e-6
+
+
+def test_the_plan_shrinks_as_your_money_does(app, tmp_path):
+    rich = run_js(app, {"plan": True}, tmp_path)
+    poor = run_js(app, {"teamEdits": {"you": {"budget": 200}}, "plan": True},
+                  tmp_path)
+    assert poor["plan"]["lineupPts"] < rich["plan"]["lineupPts"]
+    assert poor["plan"]["spend"] <= 200 + 1e-6
