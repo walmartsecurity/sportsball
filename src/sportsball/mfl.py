@@ -188,8 +188,23 @@ def _auction_is_open(row: Mapping, now: float | None = None) -> bool:
     you cannot have in the plan. When a row says nothing either way this
     returns False, because the endpoint is named for results and treating an
     unknown as sold matches what MFL has always meant by it.
+
+    The two errors are not equally cheap, so where a row is contradictory the
+    open reading wins. Calling an open auction sold hides a player you could
+    have won and there is no recovering from a bid you never made; calling a
+    closed one open only puts a name in the plan that you find out is gone.
     """
     now = time.time() if now is None else now
+
+    # A running clock is the most direct statement a row can make: bidding is
+    # still open on this player. It outranks a status field, which can be stale
+    # or carry a value we have not seen. Zero or negative means time is up.
+    for key in _REMAINING_KEYS:
+        if row.get(key) not in (None, ""):
+            try:
+                return float(row[key]) > 0
+            except ValueError:
+                pass
 
     for key in _CLOSED_KEYS:
         if key in row:
@@ -205,13 +220,6 @@ def _auction_is_open(row: Mapping, now: float | None = None) -> bool:
             return True
         if status in ("closed", "complete", "completed", "sold", "final"):
             return False
-
-    for key in _REMAINING_KEYS:
-        if row.get(key) not in (None, ""):
-            try:
-                return float(row[key]) > 0
-            except ValueError:
-                pass
 
     for key in _END_KEYS:
         if row.get(key) not in (None, ""):

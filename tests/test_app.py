@@ -592,3 +592,63 @@ def test_unselling_reaches_past_the_last_sale(app, py_board, tmp_path):
     assert out["bids"][1]["bid"] == 80
     assert out["teams"]["Team 2"]["budget"] == 1000
     assert out["teams"]["Team 3"]["budget"] == 920
+
+
+# ---------------- the dropoff curve ----------------
+
+def test_each_curve_runs_best_to_worst(app, tmp_path):
+    out = run_js(app, {"chart": True, "chartDepth": 0}, tmp_path)
+    for pos, line in out["chart"]["lines"].items():
+        assert line["pts"] == sorted(line["pts"], reverse=True), pos
+
+
+def test_the_curves_only_draw_players_still_available(app, py_board, tmp_path):
+    """The scarcity that matters is what is left, so a sale leaves the line."""
+    target = py_board.top(1)[0]
+    pid, pos = target.player.player_id, target.player.position
+    before = run_js(app, {"chart": True, "chartDepth": 0}, tmp_path)
+    after = run_js(app, {"chart": True, "chartDepth": 0,
+                         "sales": [{"id": pid, "price": 90, "team": "Team 2"}]},
+                   tmp_path)
+    assert pid in before["chart"]["lines"][pos]["ids"]
+    assert pid not in after["chart"]["lines"][pos]["ids"]
+    assert after["chart"]["lines"][pos]["left"] == before["chart"]["lines"][pos]["left"] - 1
+
+
+def test_depth_caps_what_is_drawn_without_lying_about_what_is_left(app, tmp_path):
+    out = run_js(app, {"chart": True, "chartDepth": 24}, tmp_path)
+    for pos, line in out["chart"]["lines"].items():
+        assert line["drawn"] <= 24
+        assert line["left"] >= line["drawn"]
+    deep = run_js(app, {"chart": True, "chartDepth": 0}, tmp_path)
+    for pos, line in deep["chart"]["lines"].items():
+        assert line["drawn"] == line["left"]
+
+
+def test_the_axes_span_the_plot(app, tmp_path):
+    out = run_js(app, {"chart": True}, tmp_path)
+    c, geom = out["chart"], {"w": 440, "h": 250, "l": 32, "r": 8, "t": 10, "b": 24}
+    assert c["x1"] == geom["l"]
+    assert c["xEnd"] == geom["w"] - geom["r"]
+    assert c["yZero"] == geom["h"] - geom["b"]
+    assert c["yTop"] == geom["t"]
+    assert c["top"] >= max(l["pts"][0] for l in c["lines"].values())
+
+
+def test_hiding_a_position_drops_it_from_the_scales_and_the_note(app, tmp_path):
+    shown = run_js(app, {"chart": True}, tmp_path)
+    hidden = run_js(app, {"chart": True, "chartOff": ["QB"]}, tmp_path)
+    assert "QB" in shown["chart"]["note"] and "QB" not in hidden["chart"]["note"]
+    assert hidden["chart"]["top"] <= shown["chart"]["top"]
+
+
+def test_the_note_ranks_positions_by_how_fast_they_fall_away(app, tmp_path):
+    """The sentence under the chart is the reason to read the chart."""
+    out = run_js(app, {"chart": True, "chartDepth": 0}, tmp_path)
+    gaps = []
+    for pos, line in out["chart"]["lines"].items():
+        if len(line["pts"]) > 12:
+            gaps.append((pos, (line["pts"][0] - line["pts"][11]) / 11))
+    gaps.sort(key=lambda g: -g[1])
+    order = [pos for pos, _ in gaps]
+    assert [w for w in out["chart"]["note"].split() if w in order] == order

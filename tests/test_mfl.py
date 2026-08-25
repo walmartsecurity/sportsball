@@ -283,3 +283,24 @@ def test_an_open_auction_does_not_spend_a_budget(payloads):
     )
     # Allan Hepworth's only closed sale is Josh Allen at 100.
     assert built["teamEdits"]["Allan Hepworth"]["budget"] == 900
+
+
+def test_a_running_clock_means_still_on_the_block():
+    assert _auction_is_open({"timeRemaining": "3600"}) is True
+    assert _auction_is_open({"secondsRemaining": 1}) is True
+
+
+def test_the_clock_running_out_means_sold():
+    assert _auction_is_open({"timeRemaining": "0"}) is False
+    assert _auction_is_open({"secondsRemaining": -5}) is False
+
+
+def test_a_running_clock_outranks_a_stale_status():
+    """Contradictory row: believe the clock, and leave him gettable."""
+    assert _auction_is_open({"status": "sold", "timeRemaining": "600"}) is True
+    assert _auction_is_open({"closed": "1", "timeRemaining": "600"}) is True
+
+
+def test_an_unparseable_clock_falls_through_to_the_other_signals():
+    assert _auction_is_open({"timeRemaining": "soon", "status": "open"}) is True
+    assert _auction_is_open({"timeRemaining": "soon", "status": "sold"}) is False

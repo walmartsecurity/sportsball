@@ -25,6 +25,9 @@ const engine = new Function(script + `
            dollarsPerPoint, inflation, recordSale: (id,pr,t)=>{ sales.push({id,price:pr,team:t}); },
            setDPP: () => { DPP = dollarsPerPoint(); },
            nowPrice, nowIsLive, unsell, sales: () => sales, roomBids: () => roomBids,
+           curves, chartScales, dropoffNote, chartPos: CHART_POS, CHART,
+           setChartDepth: n => { chartDepth = n; },
+           toggleChartPos: pos => { chartOff.has(pos) ? chartOff.delete(pos) : chartOff.add(pos); },
            state: () => ({ myBudget: myBudget(), myOpen: myOpen(), hardCap: hardCap(),
                            dpp: DPP, inflation: inflation() }) };
 `)();
@@ -46,6 +49,9 @@ for (const sale of req.sales || []) {
 for (const u of req.unsell || []) engine.unsell(u.id, !!u.standingBid);
 engine.setDPP();
 
+if (req.chartDepth !== undefined) engine.setChartDepth(req.chartDepth);
+for (const pos of req.chartOff || []) engine.toggleChartPos(pos);
+
 out.state = engine.state();
 out.room = engine.roomPricing();
 out.league = { money: engine.leagueLeft(), slots: engine.slotsLeft() };
@@ -60,6 +66,19 @@ out.bids = (req.bids || []).map(id => {
            source: engine.bidSource(p), open: engine.isUnderBidding(p),
            now: engine.nowPrice(p), nowLive: engine.nowIsLive(p) };
 });
+if (req.chart) {
+  const lines = engine.curves();
+  const sc = engine.chartScales(lines);
+  out.chart = {
+    note: engine.dropoffNote(lines),
+    maxRank: sc.maxRank, top: sc.top,
+    x1: sc.px(1), xEnd: sc.px(sc.maxRank),
+    yZero: sc.py(0), yTop: sc.py(sc.top),
+    lines: Object.fromEntries(Object.entries(lines).map(([pos, l]) => [pos, {
+      drawn: l.length, left: l.left, pts: l.map(p => p.pts), ids: l.map(p => p.id),
+    }])),
+  };
+}
 if (req.plan) {
   const plan = engine.targetRoster();
   out.plan = {
