@@ -177,6 +177,55 @@ in 2025; a human would bounce him back and the model will not. Bundled
 projections are a starting point — regenerate before you draft, and override
 with better numbers where you have them.
 
+## Using MyFantasyLeague
+
+If your league runs on MFL, this is the best source available, for one reason:
+**MFL scores in your league's own rules.** Its projections arrive as SFB16
+points — tight end premium, first downs and video game bonuses included — so
+nothing has to be re-scored or approximated. It also knows what every player
+went for and what every franchise has left.
+
+```
+python tools/fetch_mfl.py --league 36570 --host www43 --year 2026 \
+    --me "Your Franchise" --out-dir mfl/
+python tools/build_app.py --projections mfl/projections.csv \
+    --seed mfl/seed.json --out app.html
+```
+
+That writes the board (`projections.csv`, with MFL's league-scored points in a
+`fantasy_points` column) and the draft state (`seed.json`, every completed sale
+plus every franchise's remaining salary).
+
+If the API is unreachable from your network, save the endpoints and point the
+tool at them — it does the same work either way:
+
+```
+base='https://www43.myfantasyleague.com/2026/export'
+for t in league players auctionResults rosters; do
+  curl -sS "$base?TYPE=$t&L=36570&JSON=1" > mfl/$t.json
+done
+curl -sS "$base?TYPE=projectedScores&L=36570&W=YTD&JSON=1" > mfl/projectedScores.json
+python tools/fetch_mfl.py --from-dir mfl/ --me "Your Franchise" --out-dir mfl/
+```
+
+A private league needs `--apikey`; without it MFL returns a login page instead
+of data, which the tool reports rather than parsing into nonsense.
+
+Two details worth knowing. **Budgets come from committed roster salary, not
+from summing the auction** — a kicker's salary is spent money even though
+kickers are not on this board, so the two disagree and the roster is right.
+And **franchises that have not bought anything are still carried**, because
+their money sets prices for everyone.
+
+MFL's response shapes vary by endpoint — a collection with exactly one member
+comes back as a bare object rather than a list — so every reader tolerates a
+missing layer, and `--inspect` prints what actually arrived before anything is
+written:
+
+```
+python tools/fetch_mfl.py --league 36570 --host www43 --inspect
+```
+
 ## Using Sleeper's projections instead
 
 Sleeper projects stat lines, which is what this tool wants — their fantasy
@@ -717,6 +766,7 @@ Layout:
 | `cli.py` | the commands |
 | `tools/fit_bonus_rates.py` | fits the constants from nflverse play-by-play |
 | `tools/project_from_nflverse.py` | builds projections from play-by-play history |
+| `tools/fetch_mfl.py` | imports an MFL league: board, auction, budgets |
 | `tools/fetch_sleeper.py` | imports Sleeper's projected stat lines |
 | `tools/make_sample.py` | regenerates a synthetic board with no real names |
 | `tools/build_app.py` | builds the standalone draft-room web app |
