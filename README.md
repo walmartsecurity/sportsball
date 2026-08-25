@@ -184,14 +184,23 @@ it is built. That is right for something you open on a phone at a table, and
 wrong for a draft that is moving, where every sale would mean a rebuild.
 
 `sportsball serve` closes the loop. It serves the app from your machine and
-polls MFL behind it, so sales and franchise budgets arrive on their own:
+polls MFL behind it, so sales and franchise budgets arrive on their own. From
+a clean checkout:
 
 ```
-python tools/build_app.py --projections mfl/projections.csv --out app.html
+pip install -e '.[solver]'
+python tools/build_app.py --out app.html
 sportsball serve --league 36570 --host www43 --me "Your Franchise"
 ```
 
-Open the address it prints. A dot in the header shows how fresh the sync is.
+Open the address it prints. A dot in the header shows how fresh the sync is,
+and goes amber when the league data is older than three sync cycles.
+
+`--me` has to match your franchise name in MFL exactly, or the app will track
+the room correctly and think you own nothing. `--apikey` is required for a
+private league; without it MFL answers with a login page rather than data.
+Run `python tools/fetch_mfl.py --league <id> --host <host> --inspect` to see
+what your league actually returns, franchise names included.
 
 Two problems solve themselves by putting a server in the middle. **The browser
 cannot call MFL directly** — a `file://` page or a published artifact is
@@ -204,8 +213,24 @@ The room is authoritative about what sold and what everyone has left, so those
 are replaced on every sync and Undo is disabled while it is connected. **The
 bids you typed in are yours and survive** — they are the one thing the league
 does not know. If a fetch fails the last good state stays on screen rather than
-blanking mid-draft, and the page polls faster than the server refetches, so
-your league sees one request every twenty seconds rather than one per poll.
+blanking mid-draft, and repeated failures back off to a minute instead of
+hammering a league that is down.
+
+Fetching runs on a background thread, so a page poll is answered from cache and
+never waits on MFL. Only `auctionResults` and `rosters` are refetched: the
+player dictionary is every player in the league's universe and cannot change
+mid-draft, so it is read once. That is what makes `--refresh 5` (the default)
+affordable to hold for a three-hour auction — a cycle is two small requests,
+not five large ones. A change in the league reaches the open page in about
+three and a half seconds.
+
+**A slow auction keeps players open for hours**, and `auctionResults` returns
+those in-progress rows alongside finished ones. They are not sales: the player
+is still winnable and the price is not final, so they arrive as standing bids,
+tagged `BIDDING` on the board, priced at the current high bid, and they do not
+spend the bidder's budget. Time remaining above zero settles it; where a row
+contradicts itself the open reading wins, because a player wrongly marked sold
+is one you never bid on.
 
 `--from-dir` syncs from saved endpoint json instead of the network, which is
 how it can be exercised without a live league.

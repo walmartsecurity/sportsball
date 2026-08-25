@@ -210,6 +210,14 @@ def make_handler(app_path: Path, state: LiveState):
 
 def serve(app_path: Path, state: LiveState, port: int = 8765,
           address: str = "127.0.0.1") -> None:
+    if not app_path.exists():
+        # Starting anyway would leave a server that answers every page load
+        # with a 500, which is a confusing way to find out you skipped a step.
+        raise SystemExit(
+            f"no app at {app_path}\n"
+            f"  build one first:  python tools/build_app.py --out {app_path}\n"
+            f"  or point at one:  sportsball serve --app /path/to/app.html"
+        )
     handler = make_handler(app_path, state)
     server = ThreadingHTTPServer((address, port), handler)
     where = f"http://{address}:{server.server_address[1]}/"

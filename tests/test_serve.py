@@ -168,3 +168,12 @@ def test_the_api_key_never_reaches_the_page(state, server):
     state.refresh_once()
     _, body = get(server + "/live")
     assert "SUPERSECRET" not in body
+
+
+def test_serving_a_missing_app_stops_before_it_starts(state, tmp_path):
+    """Otherwise the server comes up and 500s on every page load instead."""
+    from sportsball.serve import serve
+
+    with pytest.raises(SystemExit) as exc:
+        serve(tmp_path / "not-built.html", state, port=0)
+    assert "build_app.py" in str(exc.value)
