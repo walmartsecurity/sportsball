@@ -772,7 +772,10 @@ function sameState(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+let polling = false;
 async function pollLive() {
+  if (polling) return;               // a slow answer must not stack requests
+  polling = true;
   let data;
   try {
     const response = await fetch("live", { cache: "no-store" });
@@ -781,6 +784,8 @@ async function pollLive() {
   } catch (e) {
     if (live.on) { live.error = "lost the server"; render(); }
     return;
+  } finally {
+    polling = false;
   }
   if (!data.live) return;              // served without a league; nothing to sync
 
@@ -791,7 +796,9 @@ async function pollLive() {
     || !sameState(data.teamEdits || {}, teamEdits)
     || !sameState(incomingOpen, roomBids);
   live = { on: true, at: Date.now(), error: data.error || null,
-           note: (data.notes || [])[0] || null };
+           note: (data.notes || [])[0] || null,
+           // Seconds since MFL was actually read, and the cycle it is read on.
+           stale: data.stale, refresh: data.refresh };
   if (changed) {
     sales = incoming;
     roomBids = incomingOpen;
@@ -803,9 +810,13 @@ async function pollLive() {
   render();
 }
 
+/* Poll fast: the server answers from its own cache, so a request costs a
+   round trip to localhost and nothing more. It does its MFL fetching on a
+   timer of its own, which is the number that actually protects the league. */
+const POLL_MS = 2000;
 function startLive() {
   pollLive();
-  setInterval(pollLive, 5000);
+  setInterval(pollLive, POLL_MS);
 }
 
 /* ---------------- actions ---------------- */
@@ -981,8 +992,14 @@ function renderBar() {
     dot.hidden = true;
   } else {
     dot.hidden = false;
-    const secs = Math.round((Date.now() - live.at) / 1000);
-    const bad = live.error || secs > 60;
+    // How old the league data is, not how recently we called our own server:
+    // a server happily serving a ten-minute-old cache is not "just now".
+    const drift = (Date.now() - live.at) / 1000;   // since we last heard back
+    const secs = Math.round(live.stale != null ? live.stale + drift : drift);
+    // Late is relative to the sync cycle -- 20s is fine at --refresh 30 and a
+    // sign of trouble at --refresh 2.
+    const limit = Math.max((live.refresh || 5) * 3, 15);
+    const bad = live.error || secs > limit;
     dot.className = "livedot" + (bad ? " stale" : "");
     dot.textContent = live.error ? live.error
       : `live · ${secs < 5 ? "just now" : secs + "s ago"}`;

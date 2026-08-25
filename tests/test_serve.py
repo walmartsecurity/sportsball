@@ -24,7 +24,10 @@ FIXTURES = Path(__file__).parent / "fixtures" / "mfl"
 
 @pytest.fixture
 def state():
-    return LiveState(from_dir=str(FIXTURES), me="Jeffrey Smar", refresh=0.0)
+    """Primed once, the way start() primes it, but with no thread running."""
+    live = LiveState(from_dir=str(FIXTURES), me="Jeffrey Smar", refresh=3600.0)
+    live.refresh_once()
+    return live
 
 
 def test_a_server_without_a_league_reports_itself_inert():
@@ -43,22 +46,64 @@ def test_a_fetch_failure_keeps_the_last_good_state(state):
     """A blip must not blank the app in the middle of a draft."""
     good = state.snapshot()
     state.from_dir = "/nonexistent/path"
-    state.fetched_at = 0.0
+    state.refresh_once()
     degraded = state.snapshot()
     assert degraded["sales"] == good["sales"]
     assert degraded["error"]
 
 
-def test_the_cache_spares_the_league_a_request_per_poll():
-    """The page polls faster than the refresh interval on purpose."""
-    slow = LiveState(from_dir=str(FIXTURES), me="Jeffrey Smar", refresh=3600.0)
-    first = slow.snapshot()
-    stamp = slow.fetched_at
-    slow.from_dir = "/nonexistent/path"   # would fail if it refetched
-    second = slow.snapshot()
-    assert slow.fetched_at == stamp
-    assert second["sales"] == first["sales"]
-    assert "error" not in second
+def test_a_snapshot_never_waits_on_the_league(state):
+    """The page polls several times per sync cycle on purpose.
+
+    If a poll could trigger a fetch, a short refresh interval would just move
+    the stall from the server into the browser.
+    """
+    first = state.snapshot()
+    stamp = state.fetched_at
+    state.from_dir = "/nonexistent/path"   # would fail if it refetched
+    for _ in range(5):
+        assert state.snapshot()["sales"] == first["sales"]
+    assert state.fetched_at == stamp
+    assert "error" not in state.snapshot()
+
+
+def test_failures_back_off_instead_of_hammering_a_league_that_is_down(state):
+    state.from_dir = "/nonexistent/path"
+    for expected in (1, 2, 3):
+        state.refresh_once()
+        assert state.failures == expected
+    state.from_dir = str(FIXTURES)
+    state.refresh_once()
+    assert state.failures == 0
+    assert state.snapshot().get("error") is None
+
+
+def test_the_static_endpoints_are_fetched_once(monkeypatch):
+    """The player dictionary is the whole league's universe and cannot change
+    mid-draft; refetching it every few seconds is what would make a fast cycle
+    expensive."""
+    from sportsball import serve as serve_mod
+
+    calls = []
+
+    def fake_gather(**kwargs):
+        calls.append(kwargs.get("kinds"))
+        return {k: json.loads((FIXTURES / f"{k}.json").read_text())
+                for k in ("league", "players", "auctionResults", "rosters")
+                if (FIXTURES / f"{k}.json").exists()}
+
+    monkeypatch.setattr(serve_mod, "gather", fake_gather)
+    live = LiveState(league="36570", me="Jeffrey Smar", refresh=3600.0)
+    live.refresh_once()
+    live.refresh_once()
+    live.refresh_once()
+    assert calls[0] is None                      # first cycle takes everything
+    assert all(c == serve_mod.VOLATILE for c in calls[1:])
+
+
+def test_the_page_is_told_the_sync_cycle(state):
+    """It cannot judge what counts as stale without knowing the interval."""
+    assert state.snapshot()["refresh"] == state.refresh
 
 
 @pytest.fixture
@@ -120,6 +165,6 @@ def test_a_missing_app_file_says_so(state, tmp_path):
 def test_the_api_key_never_reaches_the_page(state, server):
     """It is passed to this process and stays here."""
     state.apikey = "SUPERSECRET"
-    state.fetched_at = 0.0
+    state.refresh_once()
     _, body = get(server + "/live")
     assert "SUPERSECRET" not in body

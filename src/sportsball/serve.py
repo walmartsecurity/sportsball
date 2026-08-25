@@ -21,6 +21,12 @@ solve themselves by putting the server in the middle:
 
 Then open the address it prints. Without a league id it serves the app with
 whatever it was built with, which is still useful for driving it by hand.
+
+Fetching happens on a background thread, not inside a request, so the page
+never waits on MFL and can poll as often as it likes. Only the endpoints that
+move during a draft are refetched; the player dictionary and the franchise
+list are read once. Between them that is what makes a few seconds an
+affordable cycle to hold for the length of an auction.
 """
 
 from __future__ import annotations
@@ -38,9 +44,19 @@ from .mfl import (
     read_players, read_roster_salaries, read_salary_cap,
 )
 
-# How stale the cached MFL state may get before a request refreshes it. The
-# page polls faster than this; the interval is what protects MFL from us.
-DEFAULT_REFRESH = 20.0
+# Seconds between MFL fetches. A refresher thread keeps to this on its own, so
+# the page is never waiting on MFL -- it reads whatever the last cycle left.
+DEFAULT_REFRESH = 5.0
+
+# Of the endpoints we read, only these two move while a draft is running. The
+# other three -- the player dictionary above all, which is every player in the
+# league's universe -- are fetched once and reused, which is what makes a
+# five-second cycle cheap enough to run for three hours.
+VOLATILE = ("auctionResults", "rosters")
+
+# After a failure, wait longer each time rather than hammering a league that is
+# down or rate-limiting us. Resets on the first success.
+MAX_BACKOFF = 60.0
 
 
 @dataclass
@@ -58,33 +74,62 @@ class LiveState:
     payload: dict = field(default_factory=dict)
     fetched_at: float = 0.0
     error: str | None = None
+    failures: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _static: dict = field(default_factory=dict, repr=False)
+    _stop: threading.Event = field(default_factory=threading.Event, repr=False)
 
     @property
     def enabled(self) -> bool:
         return bool(self.league or self.from_dir)
 
     def snapshot(self) -> dict:
-        """Current state, refreshed if the cached copy has gone stale."""
+        """Whatever the last cycle left, without ever waiting on MFL.
+
+        The page polls this several times a second's worth of times a minute;
+        if it also had to sit through a round trip to MFL on a cache miss, a
+        short refresh interval would just move the stall into the browser.
+        """
         if not self.enabled:
             return {"live": False}
         with self._lock:
-            if time.time() - self.fetched_at >= self.refresh:
-                self._refresh()
             out = dict(self.payload)
+            fetched, error = self.fetched_at, self.error
         out["live"] = True
-        out["fetchedAt"] = self.fetched_at
-        out["stale"] = time.time() - self.fetched_at
-        if self.error:
-            out["error"] = self.error
+        out["fetchedAt"] = fetched
+        out["stale"] = time.time() - fetched if fetched else None
+        # The page cannot know what counts as late without knowing the cycle.
+        out["refresh"] = self.refresh
+        if error:
+            out["error"] = error
         return out
 
-    def _refresh(self) -> None:
+    def start(self) -> threading.Thread | None:
+        """Prime the cache, then keep it warm on a background thread."""
+        if not self.enabled:
+            return None
+        self.refresh_once()
+        thread = threading.Thread(target=self._loop, name="mfl-refresh", daemon=True)
+        thread.start()
+        return thread
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            # Back off after a failure, so a league that is down or rate
+            # limiting us is not hit at full speed for the rest of the draft.
+            wait = min(self.refresh * (2 ** self.failures), MAX_BACKOFF)
+            if self._stop.wait(wait):
+                return
+            self.refresh_once()
+
+    def refresh_once(self) -> None:
+        """One fetch-and-parse cycle. Safe to call from anywhere."""
         try:
             notes: list[str] = []
-            payloads = gather(host=self.host, year=self.year, league=self.league,
-                              apikey=self.apikey, from_dir=self.from_dir,
-                              on_note=notes.append)
+            payloads = self._gather(notes.append)
             seed, seed_notes = build_seed_state(
                 read_players(payloads.get("players")),
                 read_auction(payloads.get("auctionResults")),
@@ -93,17 +138,38 @@ class LiveState:
                 read_roster_salaries(payloads.get("rosters")),
                 self.me,
             )
-            self.payload = {"sales": seed["sales"],
-                            "openBids": seed.get("openBids", {}),
-                            "teamEdits": seed["teamEdits"],
-                            "notes": notes + seed_notes}
-            self.error = None
+            payload = {"sales": seed["sales"],
+                       "openBids": seed.get("openBids", {}),
+                       "teamEdits": seed["teamEdits"],
+                       "notes": notes + seed_notes}
+            with self._lock:
+                self.payload = payload
+                self.error = None
+                self.failures = 0
+                self.fetched_at = time.time()
         except (MFLError, OSError, ValueError) as exc:
             # Keep serving the last good state; a blip should not blank the app
             # in the middle of a draft.
-            self.error = str(exc)
-        finally:
-            self.fetched_at = time.time()
+            with self._lock:
+                self.error = str(exc)
+                self.failures += 1
+
+    def _gather(self, note) -> dict:
+        """Fetch what has changed, reuse what cannot have.
+
+        Saved files are cheap to re-read and may have been re-dumped, so that
+        path always reads everything.
+        """
+        if self.from_dir:
+            return gather(from_dir=self.from_dir, on_note=note)
+        if not self._static:
+            everything = gather(host=self.host, year=self.year, league=self.league,
+                                apikey=self.apikey, on_note=note)
+            self._static = {k: v for k, v in everything.items() if k not in VOLATILE}
+            return everything
+        fresh = gather(host=self.host, year=self.year, league=self.league,
+                       apikey=self.apikey, kinds=VOLATILE, on_note=note)
+        return {**self._static, **fresh}
 
 
 def make_handler(app_path: Path, state: LiveState):
@@ -150,12 +216,14 @@ def serve(app_path: Path, state: LiveState, port: int = 8765,
     print(f"draft room serving {app_path.name} at {where}")
     if state.enabled:
         source = state.from_dir or f"MFL league {state.league} on {state.host}"
-        print(f"  syncing from {source} every {state.refresh:.0f}s")
+        print(f"  syncing from {source} every {state.refresh:g}s")
+        state.start()
         snap = state.snapshot()
         if snap.get("error"):
             print(f"  WARNING: first sync failed — {snap['error']}")
         else:
             print(f"  {len(snap.get('sales', []))} sales, "
+                  f"{len(snap.get('openBids', {}))} under bidding, "
                   f"{len(snap.get('teamEdits', {}))} franchises")
     else:
         print("  no league given, so the page keeps whatever it was built with")
@@ -165,4 +233,5 @@ def serve(app_path: Path, state: LiveState, port: int = 8765,
     except KeyboardInterrupt:
         print("\nstopped")
     finally:
+        state.stop()
         server.server_close()

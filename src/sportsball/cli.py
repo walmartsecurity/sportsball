@@ -22,6 +22,7 @@ from .optimize import optimize_roster
 from .players import (ProjectionError, default_projections_path,
                       load_projections)
 from .scoring import score_all, upside_points
+from .serve import DEFAULT_REFRESH
 from .valuation import Valuation, ValuationBoard, value_players
 
 # Tier break: a gap of this many dollars between consecutive players at a
@@ -609,8 +610,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--from-dir", default=None,
                          help="sync from saved MFL json instead of the network")
     p_serve.add_argument("--me", default=None, help="your franchise name")
-    p_serve.add_argument("--refresh", type=float, default=20.0,
-                         help="seconds between MFL fetches (default 20)")
+    p_serve.add_argument("--refresh", type=float, default=DEFAULT_REFRESH,
+                         help=f"seconds between MFL fetches "
+                              f"(default {DEFAULT_REFRESH:g})")
     p_serve.add_argument("--port", type=int, default=8765)
     p_serve.set_defaults(func=cmd_serve)
 
