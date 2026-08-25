@@ -12,7 +12,7 @@ const engine = new Function(script + `
            openSlotsOf, maxBidOf, leagueLeft, slotsLeft, targetRoster,
            setExpected: (id, v) => { if (v === null) delete expected[id]; else expected[id] = v; },
            setTeamEdit: (t, f, v) => { (teamEdits[t] = teamEdits[t] || {})[f] = v; },
-           applyToEdit, suggestions, startableLeft, qbJobsLeft, roomPricing,
+           applyToEdit, load, seedState, SEED, suggestions, startableLeft, qbJobsLeft, roomPricing,
            dollarsPerPoint, inflation, recordSale: (id,pr,t)=>{ sales.push({id,price:pr,team:t}); },
            setDPP: () => { DPP = dollarsPerPoint(); },
            state: () => ({ myBudget: myBudget(), myOpen: myOpen(), hardCap: hardCap(),
@@ -21,6 +21,9 @@ const engine = new Function(script + `
 
 const req = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 const out = {};
+// The app calls load() on start; the harness slices that off, so do it here
+// when a test wants the state the board actually ships with.
+if (req.load) engine.load();
 for (const [team, edit] of Object.entries(req.teamEdits || {})) {
   for (const [field, value] of Object.entries(edit)) engine.setTeamEdit(team, field, value);
 }

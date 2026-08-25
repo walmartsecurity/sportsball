@@ -1,0 +1,233 @@
+{
+  "sales": [
+    {
+      "id": "josh-allen-qb",
+      "price": 100,
+      "team": "Allan Hepworth"
+    },
+    {
+      "id": "tee-higgins-wr",
+      "price": 61,
+      "team": "Allan Hepworth"
+    },
+    {
+      "id": "christian-mccaffrey-rb",
+      "price": 113,
+      "team": "Kevin Zatloukal"
+    },
+    {
+      "id": "ladd-mcconkey-wr",
+      "price": 50,
+      "team": "Kevin Zatloukal"
+    },
+    {
+      "id": "george-kittle-te",
+      "price": 38,
+      "team": "Kevin Zatloukal"
+    },
+    {
+      "id": "george-pickens-wr",
+      "price": 71,
+      "team": "PunkerDad"
+    },
+    {
+      "id": "ja-marr-chase-wr",
+      "price": 175,
+      "team": "you"
+    },
+    {
+      "id": "joe-burrow-qb",
+      "price": 47,
+      "team": "PunkerDad"
+    },
+    {
+      "id": "jameson-williams-wr",
+      "price": 61,
+      "team": "PunkerDad"
+    },
+    {
+      "id": "chase-brown-rb",
+      "price": 121,
+      "team": "Charles Kangas"
+    },
+    {
+      "id": "jeremiyah-love-rb",
+      "price": 40,
+      "team": "Jeremy Seeman"
+    },
+    {
+      "id": "brock-bowers-te",
+      "price": 115,
+      "team": "Anthony Knarr"
+    },
+    {
+      "id": "jahmyr-gibbs-rb",
+      "price": 167,
+      "team": "PunkerDad"
+    },
+    {
+      "id": "james-cook-rb",
+      "price": 95,
+      "team": "PunkerDad"
+    },
+    {
+      "id": "kenneth-walker-iii-rb",
+      "price": 80,
+      "team": "PunkerDad"
+    },
+    {
+      "id": "trey-mcbride-te",
+      "price": 117,
+      "team": "Daniel McAlee"
+    },
+    {
+      "id": "puka-nacua-wr",
+      "price": 155,
+      "team": "Daniel McAlee"
+    },
+    {
+      "id": "ceedee-lamb-wr",
+      "price": 125,
+      "team": "you"
+    },
+    {
+      "id": "omarion-hampton-rb",
+      "price": 75,
+      "team": "Jeremy Seeman"
+    },
+    {
+      "id": "justin-jefferson-wr",
+      "price": 135,
+      "team": "you"
+    },
+    {
+      "id": "malik-nabers-wr",
+      "price": 72,
+      "team": "PunkerDad"
+    },
+    {
+      "id": "de-von-achane-rb",
+      "price": 84,
+      "team": "Allan Hepworth"
+    },
+    {
+      "id": "jayden-daniels-qb",
+      "price": 53,
+      "team": "Allan Hepworth"
+    },
+    {
+      "id": "rashee-rice-wr",
+      "price": 61,
+      "team": "Allan Hepworth"
+    },
+    {
+      "id": "caleb-williams-qb",
+      "price": 80,
+      "team": "Allan Hepworth"
+    },
+    {
+      "id": "ashton-jeanty-rb",
+      "price": 101,
+      "team": "PunkerDad"
+    },
+    {
+      "id": "treveyon-henderson-rb",
+      "price": 32,
+      "team": "Anthony Knarr"
+    },
+    {
+      "id": "bucky-irving-rb",
+      "price": 31,
+      "team": "Anthony Knarr"
+    },
+    {
+      "id": "josh-downs-wr",
+      "price": 21,
+      "team": "Anthony Knarr"
+    },
+    {
+      "id": "drake-maye-qb",
+      "price": 66,
+      "team": "Daniel McAlee"
+    },
+    {
+      "id": "cam-skattebo-rb",
+      "price": 27,
+      "team": "Daniel McAlee"
+    },
+    {
+      "id": "jake-ferguson-te",
+      "price": 24,
+      "team": "Kevin Zatloukal"
+    },
+    {
+      "id": "a-j-brown-wr",
+      "price": 65,
+      "team": "Kevin Zatloukal"
+    },
+    {
+      "id": "jaxon-smith-njigba-wr",
+      "price": 106,
+      "team": "Kevin Zatloukal"
+    },
+    {
+      "id": "jonathan-taylor-rb",
+      "price": 81,
+      "team": "Kevin Zatloukal"
+    },
+    {
+      "id": "de-zhaun-stribling-wr",
+      "price": 34,
+      "team": "Michael Dickinson"
+    },
+    {
+      "id": "patrick-mahomes-qb",
+      "price": 33,
+      "team": "Michael Dickinson"
+    },
+    {
+      "id": "tetairoa-mcmillan-wr",
+      "price": 7,
+      "team": "Michael Dickinson"
+    }
+  ],
+  "teamEdits": {
+    "Allan Hepworth": {
+      "budget": 561,
+      "players": 6
+    },
+    "Kevin Zatloukal": {
+      "budget": 523,
+      "players": 7
+    },
+    "PunkerDad": {
+      "budget": 306,
+      "players": 8
+    },
+    "you": {
+      "budget": 565,
+      "players": 3
+    },
+    "Charles Kangas": {
+      "budget": 879,
+      "players": 1
+    },
+    "Jeremy Seeman": {
+      "budget": 885,
+      "players": 2
+    },
+    "Anthony Knarr": {
+      "budget": 801,
+      "players": 4
+    },
+    "Daniel McAlee": {
+      "budget": 635,
+      "players": 4
+    },
+    "Michael Dickinson": {
+      "budget": 926,
+      "players": 3
+    }
+  },
+  "myTeam": "you"
+}

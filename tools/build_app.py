@@ -29,7 +29,8 @@ from sportsball.valuation import value_players
 TEMPLATE = Path(__file__).parent / "app_template.html"
 
 
-def build_payload(league_name: str, projections: str | None, pool: int) -> dict:
+def build_payload(league_name: str, projections: str | None, pool: int,
+                  seed: dict | None = None) -> dict:
     league = load_league(league_name)
     players = score_all(load_projections(projections), league)
     board = value_players(players, league)
@@ -57,7 +58,18 @@ def build_payload(league_name: str, projections: str | None, pool: int) -> dict:
     surplus = max(league.total_budget - spots * league.min_bid, 0.0)
     dpp = surplus / positive_vor if positive_vor > 0 else 0.0
 
+    payload_seed = seed or {}
+    if payload_seed:
+        known = {r["id"] for r in rows}
+        dropped = [s for s in payload_seed.get("sales", []) if s["id"] not in known]
+        if dropped:
+            raise SystemExit(
+                f"the seed references {len(dropped)} players outside the "
+                f"{pool}-player board (e.g. {dropped[0]['id']}); raise --pool"
+            )
+
     return {
+        "seed": payload_seed,
         "league": {
             "name": league.name,
             "teams": league.teams,
@@ -83,10 +95,14 @@ def main() -> int:
     ap.add_argument("--projections", "-p", default=None)
     ap.add_argument("--pool", type=int, default=280,
                     help="how many players to bake in (default 280)")
+    ap.add_argument("--seed", default=None,
+                    help="JSON of sales and team budgets to open with "
+                         "(see tools/seed_draft.py)")
     ap.add_argument("--out", "-o", default="app.html")
     args = ap.parse_args()
 
-    payload = build_payload(args.league, args.projections, args.pool)
+    seed = json.loads(Path(args.seed).read_text()) if args.seed else None
+    payload = build_payload(args.league, args.projections, args.pool, seed)
     html = TEMPLATE.read_text()
     if "__PAYLOAD__" not in html:
         raise SystemExit("template is missing the __PAYLOAD__ placeholder")
@@ -95,8 +111,10 @@ def main() -> int:
     out = Path(args.out)
     out.write_text(html)
     size = out.stat().st_size / 1024
+    seeded = len(payload.get("seed", {}).get("sales", []))
     print(f"wrote {out} ({size:.0f} KB, {len(payload['players'])} players, "
-          f"{payload['league']['name']}, ${payload['league']['budget']} budget)")
+          f"{payload['league']['name']}, ${payload['league']['budget']} budget"
+          + (f", opening with {seeded} sales already recorded)" if seeded else ")"))
     return 0
 
 

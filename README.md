@@ -503,6 +503,24 @@ Four things it does that a cheat sheet cannot:
 python tools/build_app.py --projections mine.csv --out app.html
 ```
 
+### Opening on a draft already under way
+
+Paste the draft room's results page into a text file and the app can ship with
+it, rather than you re-entering forty sales one at a time:
+
+```
+python tools/seed_draft.py --board board.txt --me "Your Name" \
+    --out src/sportsball/data/seed_draft.json
+python tools/build_app.py --seed src/sportsball/data/seed_draft.json --out app.html
+```
+
+Boards sometimes print two prices on your own rows, and which one was charged
+matters. The tool does not guess: it sums each manager's sales both ways and
+keeps whichever reconciles with the remaining budget printed beside their name,
+saying which it chose. If neither reconciles, it says that too. Managers who
+have not bought anything are still carried, because their money sets prices for
+everyone. "Reset draft" returns to the seeded state rather than an empty one.
+
 The static maths — scoring, the bonus models, league-wide replacement level —
 is computed in Python and baked in as JSON. The browser only runs what changes
 during a draft: repricing, your roster, and the max-bid calculation.

@@ -8,6 +8,9 @@ something. Skipped when node or the built app is unavailable.
 
 from __future__ import annotations
 
+
+from __future__ import annotations
+
 import json
 import shutil
 import subprocess
@@ -361,3 +364,87 @@ def test_the_plan_shrinks_as_your_money_does(app, tmp_path):
                   tmp_path)
     assert poor["plan"]["lineupPts"] < rich["plan"]["lineupPts"]
     assert poor["plan"]["spend"] <= 200 + 1e-6
+
+
+# -- shipping with a draft already in progress -----------------------------
+
+
+SEED_PATH = ROOT / "src" / "sportsball" / "data" / "seed_draft.json"
+
+
+@pytest.fixture(scope="module")
+def seed():
+    return json.loads(SEED_PATH.read_text())
+
+
+@pytest.fixture(scope="module")
+def seeded_app(tmp_path_factory):
+    out = tmp_path_factory.mktemp("seeded") / "app.html"
+    subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "build_app.py"),
+         "--seed", str(SEED_PATH), "--out", str(out)],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+def test_the_board_opens_with_the_draft_already_recorded(seeded_app, seed, tmp_path):
+    out = run_js(seeded_app, {"load": True}, tmp_path)
+    mine = [s for s in seed["sales"] if s["team"] == "you"]
+    assert out["state"]["myOpen"] == 20 - len(mine)
+    assert out["state"]["myBudget"] == seed["teamEdits"]["you"]["budget"]
+
+
+def test_every_manager_budget_survives_the_trip(seeded_app, seed, tmp_path):
+    """The seed's figures are what the room reported; they must arrive intact."""
+    out = run_js(seeded_app, {"load": True}, tmp_path)
+    for team, edit in seed["teamEdits"].items():
+        assert out["teams"][team]["budget"] == edit["budget"], team
+
+
+def test_managers_who_have_not_bought_are_still_seats_at_the_table(
+    seeded_app, seed, sfb16, tmp_path
+):
+    """Their money sets prices too, so the league must still be full size."""
+    out = run_js(seeded_app, {"load": True}, tmp_path)
+    assert len(out["teams"]) == sfb16.teams
+    untouched = [t for t, v in out["teams"].items() if v["budget"] == sfb16.budget]
+    assert len(untouched) == sfb16.teams - len(seed["teamEdits"])
+
+
+def test_the_seeded_league_money_matches_the_seeded_budgets(seeded_app, sfb16,
+                                                            seed, tmp_path):
+    out = run_js(seeded_app, {"load": True}, tmp_path)
+    expected = sum(e["budget"] for e in seed["teamEdits"].values())
+    expected += (sfb16.teams - len(seed["teamEdits"])) * sfb16.budget
+    assert out["league"]["money"] == expected
+
+
+def test_a_room_paying_under_value_inflates_what_is_left(seeded_app, tmp_path):
+    """Money not spent on the players already gone has to land somewhere."""
+    out = run_js(seeded_app, {"load": True}, tmp_path)
+    assert out["state"]["inflation"] > 1.0
+    assert all(r["ratio"] < 1.0 for r in out["room"].values())
+
+
+def test_seeded_players_are_off_the_board(seeded_app, seed, tmp_path):
+    sold = [s["id"] for s in seed["sales"]][:5]
+    out = run_js(seeded_app, {"load": True, "bids": sold}, tmp_path)
+    prices = {s["id"]: s["price"] for s in seed["sales"]}
+    for row in out["bids"]:
+        assert row["bid"] == prices[row["id"]]
+
+
+def test_the_plan_from_a_seeded_board_fills_what_is_left(seeded_app, sfb16, seed,
+                                                         tmp_path):
+    out = run_js(seeded_app, {"load": True, "plan": True}, tmp_path)
+    mine = len([s for s in seed["sales"] if s["team"] == "you"])
+    assert len(out["plan"]["additions"]) == sfb16.roster_size - mine
+    assert out["plan"]["spend"] <= out["state"]["myBudget"] + 1e-6
+    assert len(out["plan"]["starters"]) == sfb16.starters
+
+
+def test_an_unseeded_build_still_starts_empty(app, tmp_path):
+    out = run_js(app, {"load": True}, tmp_path)
+    assert out["state"]["myOpen"] == 20
+    assert out["state"]["inflation"] == pytest.approx(1.0, abs=1e-6)

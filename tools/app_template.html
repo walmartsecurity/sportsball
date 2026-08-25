@@ -319,8 +319,23 @@ let filterPos = null, hideSold = true, query = "";
    any other name that turns up in a sale is added, so money recorded against
    an unexpected team still counts against the league's total instead of
    quietly disappearing from the pricing. */
-const CONFIGURED_TEAMS = [MYTEAM].concat(
-  Array.from({ length: Math.max(L.teams - 1, 0) }, (_, i) => `Team ${i + 2}`));
+const SEED = DATA.seed || {};
+
+/* When the app ships with a draft already in progress, the real managers are
+   the league -- generic placeholders only fill the seats nobody has bought
+   from yet. */
+const CONFIGURED_TEAMS = (() => {
+  const named = [MYTEAM];
+  for (const name of Object.keys(SEED.teamEdits || {})) {
+    if (!named.includes(name)) named.push(name);
+  }
+  for (const sale of SEED.sales || []) {
+    if (!named.includes(sale.team)) named.push(sale.team);
+  }
+  let filler = 1;
+  while (named.length < L.teams) named.push(`Team ${filler++}`);
+  return named;
+})();
 
 function teamList() {
   const extra = [];
@@ -341,17 +356,23 @@ function save() {
     localStorage.setItem(KEY, JSON.stringify({ sales, expected, teamEdits }));
   } catch (e) {}
 }
+function seedState() {
+  sales = (SEED.sales || []).filter(s => P.has(s.id)).map(s => ({ ...s }));
+  expected = {};
+  teamEdits = JSON.parse(JSON.stringify(SEED.teamEdits || {}));
+}
+
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return;
+    if (!raw) { seedState(); return; }
     const data = JSON.parse(raw);
     // An older save was a bare array of sales.
     if (Array.isArray(data)) { sales = data.filter(s => P.has(s.id)); return; }
     sales = (data.sales || []).filter(s => P.has(s.id));
     expected = data.expected || {};
     teamEdits = data.teamEdits || {};
-  } catch (e) { sales = []; expected = {}; teamEdits = {}; }
+  } catch (e) { seedState(); }
 }
 
 /* ---------------- derived state ---------------- */
@@ -1033,8 +1054,12 @@ el("board").onclick = e => {
 };
 el("undo").onclick = undo;
 el("reset").onclick = () => {
-  if (sales.length && !confirm("Clear every sale and start the draft over?")) return;
-  sales = []; save(); selected = null; render();
+  const seeded = (SEED.sales || []).length;
+  const question = seeded
+    ? `Discard your changes and go back to the ${seeded} sales this board shipped with?`
+    : "Clear every sale and start the draft over?";
+  if (sales.length && !confirm(question)) return;
+  seedState(); save(); selected = null; render();
 };
 
 el("footnote").textContent =
