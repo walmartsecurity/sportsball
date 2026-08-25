@@ -78,6 +78,52 @@ Backtested against three seasons, predicting each from the seasons before it:
 (Spearman correlation with actual SFB16 points, players with 8+ games. Mean
 absolute error improves from 88–98 to 74–81 over the same window.)
 
+### The projected spread is too narrow
+
+Checked against five seasons of actual SFB16 scoring, the model's ranking is
+sound but its *spread* is not. Points at each rank, model against the
+2021–2025 average:
+
+| rank | actual (5yr mean) | projected | ratio |
+|---|---|---|---|
+| 1 | 722 | 520 | **72%** |
+| 10 | 567 | 459 | 81% |
+| 50 | 374 | 352 | 94% |
+| 120 | 236 | 272 | 115% |
+| 200 | 139 | 193 | **138%** |
+
+The top of the board is compressed and the tail is inflated: the model's best
+player to its 120th is a 1.91x gap where reality is 3.06x.
+
+This is not the model failing to guess a lucky outlier. The top score is
+strikingly stable — 779, 737, 711, 692, 688 — so *someone* posts about 720
+every year. It is the signature of shrinkage: pulling every player toward a
+positional prior is exactly what makes individual projections accurate, and it
+necessarily produces a distribution narrower than the one reality draws from.
+
+Spread matters here because value over replacement is a distance, and dollars
+are proportional to it. `--calibrate-spread` maps each player onto what the
+player at his rank has historically scored, leaving the ranking untouched:
+
+```
+python tools/project_from_nflverse.py --calibrate-spread --out projections.csv
+```
+
+It moves less than the point gap suggests, because normalising to a fixed
+budget absorbs most of a proportional squeeze — the top of the board rises
+about 10–15% and the middle gives back about 10%:
+
+| player | default | calibrated |
+|---|---|---|
+| Puka Nacua | $356 | **$406** (+14%) |
+| Jaxon Smith-Njigba | $295 | $333 (+13%) |
+| Bijan Robinson | $285 | $310 (+9%) |
+| Brock Bowers | $206 | $187 (−9%) |
+
+It is opt-in because the trade is real: this makes individual projections
+*worse* by squared error, since it predicts a 720-point season for whoever
+happens to rank first. It makes the board better shaped for pricing.
+
 ### Are the big plays calibrated?
 
 SFB16 pays ten points a pop for explosive plays, so a projection that is right
