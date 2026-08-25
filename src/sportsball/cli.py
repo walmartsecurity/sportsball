@@ -275,6 +275,24 @@ Commands (player names accept any unambiguous prefix):
 """
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    from pathlib import Path as _Path
+
+    from .serve import LiveState, serve
+
+    app = _Path(args.app)
+    if not app.exists():
+        print(f"error: no app at {app}. Build one first:\n"
+              f"  python tools/build_app.py --out {app}", file=sys.stderr)
+        return 1
+    state = LiveState(
+        league=args.league, host=args.host, year=args.year, apikey=args.apikey,
+        me=args.me, from_dir=args.from_dir, refresh=args.refresh,
+    )
+    serve(app, state, port=args.port)
+    return 0
+
+
 def cmd_targets(args: argparse.Namespace) -> int:
     league, players, board = _build(args)
     state = DraftState(league=league, players=players)
@@ -579,6 +597,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_targets = subs.add_parser("targets", help="what is worth bidding on")
     p_targets.add_argument("--limit", "-n", type=int, default=6)
     p_targets.set_defaults(func=cmd_targets)
+
+    p_serve = subs.add_parser(
+        "serve", help="serve the draft app and sync it from your league")
+    p_serve.add_argument("--app", default="app.html",
+                         help="the built app to serve (tools/build_app.py)")
+    p_serve.add_argument("--league", default=None, help="MFL league id")
+    p_serve.add_argument("--host", default="www43", help="your league's MFL host")
+    p_serve.add_argument("--year", type=int, default=2026)
+    p_serve.add_argument("--apikey", default=None, help="for a private league")
+    p_serve.add_argument("--from-dir", default=None,
+                         help="sync from saved MFL json instead of the network")
+    p_serve.add_argument("--me", default=None, help="your franchise name")
+    p_serve.add_argument("--refresh", type=float, default=20.0,
+                         help="seconds between MFL fetches (default 20)")
+    p_serve.add_argument("--port", type=int, default=8765)
+    p_serve.set_defaults(func=cmd_serve)
 
     p_leagues = subs.add_parser("leagues", help="list bundled league configs")
     p_leagues.set_defaults(func=cmd_leagues)

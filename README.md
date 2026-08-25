@@ -177,6 +177,39 @@ in 2025; a human would bounce him back and the model will not. Bundled
 projections are a starting point — regenerate before you draft, and override
 with better numbers where you have them.
 
+## Running it live
+
+The published app is static: the board and the draft state are baked in when
+it is built. That is right for something you open on a phone at a table, and
+wrong for a draft that is moving, where every sale would mean a rebuild.
+
+`sportsball serve` closes the loop. It serves the app from your machine and
+polls MFL behind it, so sales and franchise budgets arrive on their own:
+
+```
+python tools/build_app.py --projections mfl/projections.csv --out app.html
+sportsball serve --league 36570 --host www43 --me "Your Franchise"
+```
+
+Open the address it prints. A dot in the header shows how fresh the sync is.
+
+Two problems solve themselves by putting a server in the middle. **The browser
+cannot call MFL directly** — a `file://` page or a published artifact is
+blocked from cross-origin requests, and the artifact's content policy forbids
+them outright. Here the page only ever talks to the server it came from, and
+that server talks to MFL. And **a private league's API key stays in the
+process**; it is never handed to the page.
+
+The room is authoritative about what sold and what everyone has left, so those
+are replaced on every sync and Undo is disabled while it is connected. **The
+bids you typed in are yours and survive** — they are the one thing the league
+does not know. If a fetch fails the last good state stays on screen rather than
+blanking mid-draft, and the page polls faster than the server refetches, so
+your league sees one request every twenty seconds rather than one per poll.
+
+`--from-dir` syncs from saved endpoint json instead of the network, which is
+how it can be exercised without a live league.
+
 ## Using MyFantasyLeague
 
 If your league runs on MFL, this is the best source available, for one reason:
@@ -764,6 +797,8 @@ Layout:
 | `draft.py` | live auction state and inflation |
 | `suggest.py` | what to bid on, and when to stay quiet |
 | `cli.py` | the commands |
+| `mfl.py` | the MyFantasyLeague client |
+| `serve.py` | local server that syncs the app from your league |
 | `tools/fit_bonus_rates.py` | fits the constants from nflverse play-by-play |
 | `tools/project_from_nflverse.py` | builds projections from play-by-play history |
 | `tools/fetch_mfl.py` | imports an MFL league: board, auction, budgets |

@@ -181,6 +181,16 @@ tbody tr.sel { background: var(--accent-soft); }
 .empty-note { color: var(--ink-3); font-size: 13px; padding: 6px 0; }
 .hr { height: 1px; background: var(--line-soft); margin: 12px 0; }
 
+/* Live sync indicator */
+.livedot { display: inline-flex; align-items: center; gap: 6px; font-family: "Barlow Condensed", sans-serif; text-transform: uppercase; letter-spacing: .07em; font-size: 11px; font-weight: 600; color: var(--good); }
+.livedot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+.livedot.stale { color: var(--bad); }
+.livedot.stale::before { background: var(--bad); }
+@media (prefers-reduced-motion: no-preference) {
+  .livedot:not(.stale)::before { animation: pulse 2.4s ease-in-out infinite; }
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
 /* Targets */
 .target { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 9px 10px; border-radius: 6px; background: var(--surface-2); margin-bottom: 6px; cursor: pointer; border-left: 3px solid transparent; }
 .target:hover { outline: 1px solid var(--line); }
@@ -242,6 +252,7 @@ tbody tr.gone .pname { color: var(--ink-3); }
   <div class="stat"><span class="lbl">Most you can bid</span><b id="s-cap">—</b></div>
   <div class="stat wide"><span class="lbl">Market</span><b id="s-infl">—</b></div>
   <div class="bar-actions">
+    <span class="livedot" id="live" hidden></span>
     <button class="btn" id="undo">Undo</button>
     <button class="btn" id="reset">Reset draft</button>
   </div>
@@ -665,6 +676,53 @@ function pacing(anyPriceEdge) {
     + `each. Bid on whoever the room lets slide under the Now price.`;
 }
 
+/* ---------------- live sync ----------------
+   When this page is served by `sportsball serve`, the server polls MFL behind
+   it and hands over the sales and franchise budgets. The page cannot call MFL
+   itself -- a file:// page or a published artifact is blocked from
+   cross-origin requests -- so the server it came from is the one thing it is
+   allowed to talk to.
+
+   The room is authoritative about what was sold and what everyone has left.
+   The bids you typed in are yours and survive every sync. */
+let live = { on: false, at: 0, error: null, note: null };
+
+function sameState(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+async function pollLive() {
+  let data;
+  try {
+    const response = await fetch("live", { cache: "no-store" });
+    if (!response.ok) throw new Error(`server said ${response.status}`);
+    data = await response.json();
+  } catch (e) {
+    if (live.on) { live.error = "lost the server"; render(); }
+    return;
+  }
+  if (!data.live) return;              // served without a league; nothing to sync
+
+  const incoming = (data.sales || []).filter(s => P.has(s.id));
+  const changed = !sameState(incoming, sales)
+    || !sameState(data.teamEdits || {}, teamEdits);
+  live = { on: true, at: Date.now(), error: data.error || null,
+           note: (data.notes || [])[0] || null };
+  if (changed) {
+    sales = incoming;
+    teamEdits = data.teamEdits || {};
+    // Anything the room has settled is no longer a guess.
+    for (const sale of sales) delete expected[sale.id];
+    save();
+  }
+  render();
+}
+
+function startLive() {
+  pollLive();
+  setInterval(pollLive, 5000);
+}
+
 /* ---------------- actions ---------------- */
 /* A team whose money you typed in has that figure adjusted as it buys, so a
    correction stays correct instead of being overwritten by the next sale. */
@@ -809,6 +867,21 @@ function renderBar() {
   el("s-infl").style.color = Math.abs(inf - 1) < 0.02 ? "var(--ink)"
     : (inf > 1 ? "var(--bad)" : "var(--good)");
   el("undo").disabled = sales.length === 0;
+
+  const dot = el("live");
+  if (!live.on) {
+    dot.hidden = true;
+  } else {
+    dot.hidden = false;
+    const secs = Math.round((Date.now() - live.at) / 1000);
+    const bad = live.error || secs > 60;
+    dot.className = "livedot" + (bad ? " stale" : "");
+    dot.textContent = live.error ? live.error
+      : `live · ${secs < 5 ? "just now" : secs + "s ago"}`;
+    dot.title = live.note || "syncing from your league";
+  }
+  // The room is the record when it is talking to us.
+  el("undo").disabled = el("undo").disabled || live.on;
 }
 
 function renderBoard() {
@@ -1072,4 +1145,5 @@ el("footnote").textContent =
 
 load();
 render();
+startLive();
 </script>
