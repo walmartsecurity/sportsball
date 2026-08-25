@@ -21,7 +21,7 @@ const engine = new Function(script + `
            setExpected: (id, v) => { if (v === null) delete expected[id]; else expected[id] = v; },
            setTeamEdit: (t, f, v) => { (teamEdits[t] = teamEdits[t] || {})[f] = v; },
            applyToEdit, load, seedState, SEED,
-           setRoomBid: (id, v) => { roomBids[id] = v; }, suggestions, startableLeft, qbJobsLeft, roomPricing,
+           setRoomBid, suggestions, startableLeft, qbJobsLeft, roomPricing,
            dollarsPerPoint, inflation, recordSale: (id,pr,t)=>{ sales.push({id,price:pr,team:t}); },
            setDPP: () => { DPP = dollarsPerPoint(); },
            nowPrice, nowIsLive, unsell, sales: () => sales, roomBids: () => roomBids,
@@ -41,6 +41,7 @@ for (const [team, edit] of Object.entries(req.teamEdits || {})) {
   for (const [field, value] of Object.entries(edit)) engine.setTeamEdit(team, field, value);
 }
 for (const [id, price] of Object.entries(req.expected || {})) engine.setExpected(id, price);
+// null clears a standing bid, the way "Off the block" does.
 for (const [id, price] of Object.entries(req.roomBids || {})) engine.setRoomBid(id, price);
 for (const sale of req.sales || []) {
   engine.recordSale(sale.id, sale.price, sale.team);

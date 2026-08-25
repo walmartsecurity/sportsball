@@ -652,3 +652,25 @@ def test_the_note_ranks_positions_by_how_fast_they_fall_away(app, tmp_path):
     gaps.sort(key=lambda g: -g[1])
     order = [pos for pos, _ in gaps]
     assert [w for w in out["chart"]["note"].split() if w in order] == order
+
+
+def test_a_standing_bid_can_be_entered_and_cleared_by_hand(app, py_board, tmp_path):
+    """A page not talking to the league has no other way to hear about a
+    nomination, and a standing bid is not a guess at a final price."""
+    target = py_board.top(4)[3]
+    pid = target.player.player_id
+    on = run_js(app, {"roomBids": {pid: 88}, "bids": [pid]}, tmp_path)
+    assert on["bids"][0]["now"] == 88 and on["bids"][0]["nowLive"] is True
+
+    off = run_js(app, {"roomBids": {pid: None}, "bids": [pid]}, tmp_path)
+    assert off["bids"][0]["open"] is False
+    assert off["bids"][0]["bid"] is None
+    assert off["bids"][0]["now"] == pytest.approx(off["bids"][0]["effective"])
+
+
+def test_clearing_a_seeded_standing_bid_leaves_him_unsold(seeded_app, tmp_path):
+    """Off the block is not the same as sold -- he stays on the board."""
+    out = run_js(seeded_app, {"load": True, "roomBids": {"ceedee-lamb-wr": None},
+                              "bids": ["ceedee-lamb-wr"]}, tmp_path)
+    assert out["bids"][0]["open"] is False
+    assert out["bids"][0]["now"] is not None

@@ -853,6 +853,16 @@ function setExpected(id, price) {
   save(); render();
 }
 
+/* Put a player on the block by hand. The live sync fills these in when the app
+   is talking to your league, but a page opened on its own has no way to hear
+   about a nomination, and a standing bid is not the same thing as a guess at
+   what someone will go for -- it is a real price on a player you can still
+   win. */
+function setRoomBid(id, price) {
+  if (price === null) delete roomBids[id]; else roomBids[id] = price;
+  save(); render();
+}
+
 function setTeamEdit(team, field, value) {
   const edit = teamEdits[team] || (teamEdits[team] = {});
   if (value === null || Number.isNaN(value)) {
@@ -1071,10 +1081,14 @@ function renderDetail() {
       <button class="btn" id="sold">Sold to them</button>
     </div>
     <div class="sale" style="margin-top:8px">
+      <button class="btn" id="onblock">${live ? "Update standing bid" : "On the block now"}</button>
       <button class="btn" id="expect">Expect this price</button>
-      ${bidOf(p) !== null ? '<button class="btn" id="clearexp">Clear expected</button>' : ""}
-      <span class="note">Sets what you think he goes for, and plans around it.</span>
-    </div>`;
+      ${live ? '<button class="btn" id="clearbid">Off the block</button>' : ""}
+      ${expected[p.id] !== undefined ? '<button class="btn" id="clearexp">Clear expected</button>' : ""}
+    </div>
+    <p class="note">${live
+      ? "He is taking bids at this price. Clear it if the auction closed without you seeing the sale."
+      : "On the block records the room's live high bid. Expect is your guess at where he lands; both feed the plan."}</p>`;
 
   el("buy").onclick = () => {
     const v = Number(el("price").value);
@@ -1092,6 +1106,13 @@ function renderDetail() {
     if (!(v >= L.minBid)) return;
     setExpected(p.id, v);
   };
+  el("onblock").onclick = () => {
+    const v = Number(el("price").value);
+    if (!(v >= L.minBid)) return;
+    setRoomBid(p.id, v);
+  };
+  const off = el("clearbid");
+  if (off) off.onclick = () => setRoomBid(p.id, null);
   const clear = el("clearexp");
   if (clear) clear.onclick = () => setExpected(p.id, null);
 }
