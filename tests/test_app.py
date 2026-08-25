@@ -520,3 +520,75 @@ def test_a_seeded_board_prices_survivors_above_list(seeded_app, py_board, seed,
     out = run_js(seeded_app, {"load": True, "bids": [survivor]}, tmp_path)
     baseline = run_js(seeded_app, {"bids": [survivor]}, tmp_path)
     assert out["bids"][0]["effective"] > baseline["bids"][0]["effective"]
+
+
+def test_a_player_on_the_block_prices_at_the_standing_bid(app, py_board, tmp_path):
+    """"Now" is what he costs now. A live bid outranks the model's forecast."""
+    target = py_board.top(4)[3].player.player_id
+    out = run_js(app, {"roomBids": {target: 88}, "bids": [target]}, tmp_path)
+    assert out["bids"][0]["now"] == 88
+    assert out["bids"][0]["nowLive"] is True
+
+
+def test_a_player_nobody_has_opened_prices_at_the_market_rate(app, py_board,
+                                                              tmp_path):
+    target = py_board.top(4)[3].player.player_id
+    out = run_js(app, {"bids": [target]}, tmp_path)
+    assert out["bids"][0]["now"] == pytest.approx(out["bids"][0]["effective"])
+    assert out["bids"][0]["nowLive"] is False
+
+
+def test_a_sold_player_has_no_price_left(app, py_board, tmp_path):
+    target = py_board.top(4)[3].player.player_id
+    out = run_js(app, {"sales": [{"id": target, "price": 90, "team": "Team 2"}],
+                       "bids": [target]}, tmp_path)
+    assert out["bids"][0]["now"] is None
+
+
+def test_ceedee_is_on_the_block_not_sold(seeded_app, tmp_path):
+    """Read off a screenshot as sold; he was still taking bids."""
+    out = run_js(seeded_app, {"load": True, "bids": ["ceedee-lamb-wr"]}, tmp_path)
+    assert out["bids"][0]["source"] == "open"
+    assert out["bids"][0]["open"] is True
+    assert out["bids"][0]["now"] == 125
+
+
+def test_unselling_puts_a_player_back_and_refunds_the_team(app, py_board,
+                                                           tmp_path):
+    target = py_board.top(4)[3].player.player_id
+    out = run_js(app, {
+        "sales": [{"id": target, "price": 90, "team": "Team 2"}],
+        "unsell": [{"id": target, "standingBid": True}],
+        "bids": [target],
+    }, tmp_path)
+    assert out["bids"][0]["source"] == "open"
+    assert out["bids"][0]["now"] == 90
+    assert out["teams"]["Team 2"]["budget"] == 1000
+    assert out["teams"]["Team 2"]["players"] == 0
+
+
+def test_removing_a_sale_outright_leaves_no_standing_bid(app, py_board, tmp_path):
+    target = py_board.top(4)[3].player.player_id
+    out = run_js(app, {
+        "sales": [{"id": target, "price": 90, "team": "Team 2"}],
+        "unsell": [{"id": target, "standingBid": False}],
+        "bids": [target],
+    }, tmp_path)
+    assert out["bids"][0]["open"] is False
+    assert out["bids"][0]["bid"] is None
+    assert out["teams"]["Team 2"]["budget"] == 1000
+
+
+def test_unselling_reaches_past_the_last_sale(app, py_board, tmp_path):
+    """Undo only pops the end; a hand-recorded board is wrong in the middle."""
+    first, second = [v.player.player_id for v in py_board.top(6)[4:6]]
+    out = run_js(app, {
+        "sales": [{"id": first, "price": 90, "team": "Team 2"},
+                  {"id": second, "price": 80, "team": "Team 3"}],
+        "unsell": [{"id": first, "standingBid": False}],
+        "bids": [first, second],
+    }, tmp_path)
+    assert out["bids"][0]["bid"] is None
+    assert out["bids"][1]["bid"] == 80
+    assert out["teams"]["Team 2"]["budget"] == 1000
+    assert out["teams"]["Team 3"]["budget"] == 920

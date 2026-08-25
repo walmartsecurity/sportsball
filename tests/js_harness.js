@@ -6,6 +6,14 @@ const html = fs.readFileSync(process.argv[2], "utf8");
 const script = html.slice(html.indexOf("const DATA = "), html.indexOf("/* ---------------- wiring"));
 
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+// The mutating paths (recordSale, unsell) end in render(), which touches the
+// DOM. Stub a permissive element so those paths run to completion here and the
+// harness can check the state they leave behind.
+const stub = new Proxy(function () {}, {
+  get: (t, k) => (k === "then" ? undefined : stub),
+  set: () => true, apply: () => stub, has: () => true,
+});
+globalThis.document = { getElementById: () => stub, querySelectorAll: () => [] };
 const engine = new Function(script + `
   return { P, DATA, L, TEAMS: teamList, bestLineup, objective, wouldStart, personalRate, maxBid,
            priceOf, bidOf, bidSource, isUnderBidding, effectivePrice, pctVsValue, budgetOf, playersOf,
@@ -16,6 +24,7 @@ const engine = new Function(script + `
            setRoomBid: (id, v) => { roomBids[id] = v; }, suggestions, startableLeft, qbJobsLeft, roomPricing,
            dollarsPerPoint, inflation, recordSale: (id,pr,t)=>{ sales.push({id,price:pr,team:t}); },
            setDPP: () => { DPP = dollarsPerPoint(); },
+           nowPrice, nowIsLive, unsell, sales: () => sales, roomBids: () => roomBids,
            state: () => ({ myBudget: myBudget(), myOpen: myOpen(), hardCap: hardCap(),
                            dpp: DPP, inflation: inflation() }) };
 `)();
@@ -34,6 +43,7 @@ for (const sale of req.sales || []) {
   engine.recordSale(sale.id, sale.price, sale.team);
   engine.applyToEdit(sale.team, sale.price, 1);
 }
+for (const u of req.unsell || []) engine.unsell(u.id, !!u.standingBid);
 engine.setDPP();
 
 out.state = engine.state();
@@ -47,7 +57,8 @@ out.bids = (req.bids || []).map(id => {
   const p = engine.P.get(id);
   return { id, bid: engine.bidOf(p), effective: engine.effectivePrice(p),
            pct: engine.pctVsValue(p), value: p.val,
-           source: engine.bidSource(p), open: engine.isUnderBidding(p) };
+           source: engine.bidSource(p), open: engine.isUnderBidding(p),
+           now: engine.nowPrice(p), nowLive: engine.nowIsLive(p) };
 });
 if (req.plan) {
   const plan = engine.targetRoster();

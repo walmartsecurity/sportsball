@@ -218,6 +218,8 @@ tbody tr.sel { background: var(--accent-soft); }
 .under { color: var(--good); font-weight: 600; }
 .exp { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin-left: 4px; font-family: "Barlow Condensed", sans-serif; }
 .exp.open { color: var(--accent); font-weight: 700; }
+/* A live standing bid, as opposed to the model's forecast rate. */
+.live-px { color: var(--accent); font-weight: 600; }
 tbody tr.bidding { box-shadow: inset 3px 0 0 var(--accent); }
 tbody tr.gone .pname { color: var(--ink-3); }
 .sale select { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); color: var(--ink); }
@@ -463,6 +465,18 @@ function bidSource(p) {
   return null;
 }
 const effectivePrice = p => bidOf(p) ?? priceOf(p);
+
+/* What he costs right now, which is the number you are actually deciding
+   against. A player on the block has a standing bid, and that is his price --
+   the model's repriced rate is a forecast for players nobody has opened yet,
+   and quoting it over a live bid tells you what he should have cost instead
+   of what he does. Sold players have no "now" left. */
+function nowPrice(p) {
+  if (soldIds().has(p.id)) return null;
+  if (roomBids[p.id] !== undefined) return roomBids[p.id];
+  return priceOf(p);
+}
+const nowIsLive = p => nowPrice(p) !== null && isUnderBidding(p);
 
 /* How far a bid sits from the model's pre-draft value. Positive means the room
    is paying up. */
@@ -774,6 +788,19 @@ function undo() {
   save(); selected = null; render();
 }
 
+/* Undo only reaches the last sale, and a board recorded by hand will have a
+   wrong row somewhere in the middle of it -- a player read off the screen as
+   sold who was really still on the block. Put him back where he was, and hand
+   the team its money and its roster spot back. */
+function unsell(id, standingBid) {
+  const i = sales.findIndex(s => s.id === id);
+  if (i < 0) return;
+  const [sale] = sales.splice(i, 1);
+  applyToEdit(sale.team, sale.price, -1);
+  if (standingBid) roomBids[id] = sale.price;
+  save(); render();
+}
+
 function setExpected(id, price) {
   if (price === null) delete expected[id]; else expected[id] = price;
   save(); render();
@@ -937,7 +964,8 @@ function renderBoard() {
       <td class="mono c-hide-sm">${Math.round(p.pts)}</td>
       <td class="mono muted c-hide-sm">${Math.round(p.vor)}</td>
       <td class="mono muted">${money(p.val)}</td>
-      <td class="mono muted c-hide-sm">${sold ? "—" : money(priceOf(p))}</td>
+      <td class="mono c-hide-sm${nowIsLive(p) ? " live-px" : " muted"}">${
+        sold ? "—" : money(nowPrice(p))}</td>
       <td class="money">${bidCell}</td>
       <td class="mono">${diffCell}</td>
     </tr>`;
@@ -954,11 +982,19 @@ function renderDetail() {
     const s = sales.find(x => x.id === p.id);
     d.innerHTML = `<div class="detail-top"><span class="detail-name">${p.name}</span>
       <span class="pos ${p.pos}">${p.pos}</span>
-      <span class="muted">already sold to ${s.team} for ${money(s.price)}</span></div>`;
+      <span class="muted">recorded as sold to ${s.team} for ${money(s.price)}</span></div>
+      <div class="sale" style="margin-top:10px">
+        <button class="btn" id="unsold">Not sold — still on the block</button>
+        <button class="btn" id="unrecord">Remove this sale</button>
+        <span class="note">Puts him back on the board and refunds ${s.team}.</span>
+      </div>`;
+    el("unsold").onclick = () => unsell(p.id, true);
+    el("unrecord").onclick = () => unsell(p.id, false);
     return;
   }
   const mb = maxBid(p);
-  const now = priceOf(p);
+  const now = nowPrice(p);
+  const live = nowIsLive(p);
   const cap = hardCap();
   d.innerHTML = `
     <div class="detail-top">
@@ -972,7 +1008,8 @@ function renderDetail() {
     <div class="maxbid">
       <div><div class="lbl">Your walk-away price</div><div class="num">${money(mb)}</div></div>
       <div class="facts">
-        <div><div class="lbl">Market now</div><div class="mono">${money(now)}</div></div>
+        <div><div class="lbl">${live ? "Standing bid" : "Market now"}</div>
+             <div class="mono${live ? " live-px" : ""}">${money(now)}</div></div>
         <div><div class="lbl">Pre-draft list</div><div class="mono">${money(p.val)}</div></div>
         <div><div class="lbl">Wallet allows</div><div class="mono">${money(cap)}</div></div>
       </div>

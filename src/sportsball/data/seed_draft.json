@@ -86,11 +86,6 @@
       "team": "Daniel McAlee"
     },
     {
-      "id": "ceedee-lamb-wr",
-      "price": 125,
-      "team": "you"
-    },
-    {
       "id": "omarion-hampton-rb",
       "price": 75,
       "team": "Jeremy Seeman"
@@ -206,7 +201,7 @@
     },
     "you": {
       "budget": 565,
-      "players": 3
+      "players": 2
     },
     "Charles Kangas": {
       "budget": 879,
@@ -229,5 +224,8 @@
       "players": 3
     }
   },
-  "myTeam": "you"
+  "myTeam": "you",
+  "openBids": {
+    "ceedee-lamb-wr": 125
+  }
 }
