@@ -122,7 +122,7 @@ def test_a_supplied_points_column_is_picked_up():
     assert players[0].supplied_points == 412.5
 
 
-def test_supplied_points_bypass_the_scoring_engine(sfb16):
+def test_supplied_points_win_the_total(sfb16):
     """Trust a source that scored under your rules; it has news this does not."""
     from sportsball.scoring import score_player
 
@@ -131,8 +131,39 @@ def test_supplied_points_bypass_the_scoring_engine(sfb16):
     ))[0]
     score_player(player, sfb16)
     assert player.points == 412.5
-    assert player.bonus_points == 0.0
-    assert player.bonus_breakdown == {}
+    assert player.base_points + player.bonus_points == pytest.approx(412.5)
+
+
+def test_supplied_points_keep_this_model_s_bonus_share(sfb16):
+    """The ceiling model reads bonus_points / points to size a season's spread.
+
+    Dropping the supplied total into base_points would tell it nobody's points
+    come from big plays, and every ceiling would collapse onto one curve.
+    """
+    from sportsball.scoring import score_player, upside_points
+
+    def scored(total):
+        row = f"name,position,fantasy_points,rec,rec_yds,rec_td\nX,TE,{total},80,900,7"
+        return score_player(parse_projections(csv(row))[0], sfb16)
+
+    modelled = scored("")
+    supplied = scored("412.5")
+    share = lambda p: p.bonus_points / p.points
+    assert share(supplied) == pytest.approx(share(modelled))
+    assert sum(supplied.bonus_breakdown.values()) == pytest.approx(supplied.bonus_points)
+    # A boom player still gets a wider ceiling than a steady one.
+    assert upside_points(supplied, sfb16) / supplied.points == pytest.approx(
+        upside_points(modelled, sfb16) / modelled.points)
+
+
+def test_supplied_points_survive_a_player_with_no_stat_line(sfb16):
+    from sportsball.scoring import score_player
+
+    player = parse_projections(csv(
+        "name,position,fantasy_points\nNo Stats,TE,300"))[0]
+    score_player(player, sfb16)
+    assert player.points == 300
+    assert player.base_points == 300
 
 
 def test_a_file_can_mix_scored_and_unscored_players(sfb16):

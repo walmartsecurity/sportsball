@@ -226,8 +226,11 @@ def test_a_carried_total_is_used_verbatim(payload, sfb16, tmp_path):
     path = tmp_path / "sleeper.csv"
     write_csv(out, path, limit=50)
     players = {p.name: p for p in score_all(load_projections(path), sfb16)}
-    assert players["Ja'Marr Chase"].points == 340.2
-    assert players["Ja'Marr Chase"].bonus_points == 0.0
+    chase_scored = players["Ja'Marr Chase"]
+    assert chase_scored.points == 340.2
+    # Their total, our split -- the ceiling model needs the bonus share.
+    assert chase_scored.base_points + chase_scored.bonus_points == pytest.approx(340.2)
+    assert 0.0 < chase_scored.bonus_points < 340.2
 
 
 def test_players_without_a_carried_total_are_still_scored(payload, sfb16, tmp_path):

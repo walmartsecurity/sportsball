@@ -426,7 +426,18 @@ def test_a_room_paying_under_value_inflates_what_is_left(seeded_app, tmp_path):
     """Money not spent on the players already gone has to land somewhere."""
     out = run_js(seeded_app, {"load": True}, tmp_path)
     assert out["state"]["inflation"] > 1.0
-    assert all(r["ratio"] < 1.0 for r in out["room"].values())
+
+
+def test_room_pricing_is_read_per_position(seeded_app, tmp_path):
+    """A room can underpay overall and still overpay at one position.
+
+    Under this scoring it does exactly that -- the whole point of reporting the
+    ratio per position rather than one number for the room.
+    """
+    out = run_js(seeded_app, {"load": True}, tmp_path)
+    ratios = {pos: r["ratio"] for pos, r in out["room"].items()}
+    assert len(ratios) > 1
+    assert min(ratios.values()) < 1.0 < max(ratios.values())
 
 
 def test_seeded_players_are_off_the_board(seeded_app, seed, tmp_path):

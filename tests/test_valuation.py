@@ -95,8 +95,13 @@ def test_upside_weighting_favours_high_variance_players(sfb16, scored):
     assert boom_shift > steady_shift
 
 
-def test_tight_ends_are_more_valuable_under_the_premium(scored, sfb16):
-    """Same league, premium removed: tight end values must fall."""
+def test_tight_ends_are_more_valuable_under_the_premium(sfb16):
+    """Same league, premium removed: tight end points must fall.
+
+    This is about what the scoring engine does with a stat line, so it scores
+    the stat lines itself. The shipped projections carry totals from Sleeper,
+    and a supplied total is the same number whatever the rules say.
+    """
     import dataclasses
 
     flat = sfb16.with_overrides(
@@ -107,9 +112,14 @@ def test_tight_ends_are_more_valuable_under_the_premium(scored, sfb16):
     from sportsball.scoring import score_all
     from sportsball.players import load_projections
 
-    flat_scored = score_all(load_projections(), flat)
-    premium_te = max(p.points for p in scored if p.position == "TE")
-    flat_te = max(p.points for p in flat_scored if p.position == "TE")
+    def score(league):
+        players = load_projections()
+        for player in players:
+            player.supplied_points = None
+        return score_all(players, league)
+
+    premium_te = max(p.points for p in score(sfb16) if p.position == "TE")
+    flat_te = max(p.points for p in score(flat) if p.position == "TE")
     assert premium_te > flat_te
 
 

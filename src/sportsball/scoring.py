@@ -80,23 +80,32 @@ def score_player(player: Player, league: LeagueConfig) -> Player:
     """Score one player in place and return it.
 
     A projection that arrives already scored in this league's rules is taken as
-    given. That is the right call when the source computed it under the same
-    scoring -- it will have news this model does not -- but it means the video
-    game bonuses come from *their* model rather than the fitted one here, so a
-    total scored under some other ruleset will be silently wrong for SFB16.
+    given for its *total*. That is the right call when the source computed it
+    under the same scoring -- it will have news this model does not -- but it
+    means the video game bonuses come from *their* model rather than the fitted
+    one here, so a total scored under some other ruleset will be silently wrong
+    for SFB16. The split between ordinary and bonus points stays ours, because
+    nothing downstream can recover it from a single number.
     """
-    if player.supplied_points is not None:
-        player.points = player.supplied_points
-        player.base_points = player.supplied_points
-        player.bonus_points = 0.0
-        player.bonus_breakdown = {}
-        return player
-
     player.base_points = base_points(player, league.scoring, league.first_downs)
     player.bonus_points, player.bonus_breakdown = project_bonuses(
         player, league.bonuses
     )
     player.points = player.base_points + player.bonus_points
+
+    if player.supplied_points is not None:
+        # Take their total, keep our split. The ceiling model reads
+        # bonus_points / points to decide how much spread a season carries, so
+        # dropping the whole total into base_points would tell it that nobody's
+        # points come from big plays and flatten every ceiling to the same
+        # curve. Scaling both parts onto their total keeps that share intact.
+        scale = (player.supplied_points / player.points) if player.points > 0 else 0.0
+        player.base_points *= scale
+        player.bonus_points *= scale
+        player.bonus_breakdown = {k: v * scale for k, v in player.bonus_breakdown.items()}
+        if player.points <= 0:
+            player.base_points = player.supplied_points
+        player.points = player.supplied_points
     return player
 
 
