@@ -151,6 +151,9 @@ curl -sS 'https://api.sleeper.com/projections/nfl/2026?season_type=regular\
 python tools/fetch_sleeper.py --from-json sleeper.json --out sleeper.csv
 ```
 
+The URL above is season-level; swap `grouping=season` for a week number to
+pull weekly instead.
+
 **Taken:** volume, yardage, touchdowns, interceptions, fumbles, two-point
 conversions, and — when Sleeper projects them — rushing and receiving first
 downs, which SFB16 scores and almost nobody publishes.
@@ -173,6 +176,21 @@ python tools/fetch_sleeper.py --season 2026 --inspect
 The parser is tested against recorded payloads rather than the live service, so
 a silent shape change shows up as missing fields in `--inspect` rather than a
 plausible-looking board built on zeros.
+
+### Projections that are already scored
+
+If a source computed points under *your* league's rules, use them — it will
+have news no model does. Any projections CSV can carry a `fantasy_points`
+column (or `fpts`, `points`, `proj_points`), and those players skip the scoring
+engine entirely. The column can be left blank per row, so a file can mix
+already-scored players with ones this tool should score itself.
+
+`fetch_sleeper.py --points ppr` carries Sleeper's own totals through the same
+way, and prints a warning while doing it, because **Sleeper's totals are PPR
+and SFB16 is not**: no tight end premium, no first downs, and none of the video
+game bonuses that are 44% of a receiver's value here. It is the right switch
+only if the totals were scored the way your league scores. Otherwise take
+Sleeper's stat lines and let this apply SFB16 to them, which is the default.
 
 ## Why SFB16 needs its own model
 

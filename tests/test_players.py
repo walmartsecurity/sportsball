@@ -110,3 +110,53 @@ def test_player_ids_are_stable():
     a = Player(name="Ja'Marr Chase", position="WR", team="CIN")
     b = Player(name="Ja'Marr Chase", position="WR", team="CIN")
     assert a.player_id == b.player_id
+
+
+# -- projections that arrive already scored --------------------------------
+
+
+def test_a_supplied_points_column_is_picked_up():
+    players = parse_projections(csv(
+        "name,position,fantasy_points,rec\nPre Scored,TE,412.5,80"
+    ))
+    assert players[0].supplied_points == 412.5
+
+
+def test_supplied_points_bypass_the_scoring_engine(sfb16):
+    """Trust a source that scored under your rules; it has news this does not."""
+    from sportsball.scoring import score_player
+
+    player = parse_projections(csv(
+        "name,position,fantasy_points,rec,rec_yds,rec_td\nPre Scored,TE,412.5,80,900,7"
+    ))[0]
+    score_player(player, sfb16)
+    assert player.points == 412.5
+    assert player.bonus_points == 0.0
+    assert player.bonus_breakdown == {}
+
+
+def test_a_file_can_mix_scored_and_unscored_players(sfb16):
+    from sportsball.scoring import score_player
+
+    players = parse_projections(csv(
+        "name,position,fantasy_points,rec,rec_yds,rec_td\n"
+        "Pre Scored,TE,412.5,80,900,7\n"
+        "Score Me,TE,,80,900,7"
+    ))
+    for player in players:
+        score_player(player, sfb16)
+    assert players[0].points == 412.5
+    assert players[1].supplied_points is None
+    assert players[1].bonus_points > 0
+    assert players[1].points != 412.5
+
+
+@pytest.mark.parametrize("header", ["fpts", "points", "proj_points", "fantasy_pts"])
+def test_common_spellings_of_a_points_column(header):
+    players = parse_projections(csv(f"name,position,{header}\nSome Guy,WR,301"))
+    assert players[0].supplied_points == 301
+
+
+def test_a_missing_points_column_leaves_players_unscored():
+    players = parse_projections(csv("name,position,rec\nSome Guy,WR,80"))
+    assert players[0].supplied_points is None

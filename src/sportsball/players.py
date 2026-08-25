@@ -78,6 +78,10 @@ class Player:
     player_id: str = ""
     bye: int = 0
 
+    # Set when the projection source already scored the player under this
+    # league's rules, in which case the scoring engine leaves them alone.
+    supplied_points: float | None = None
+
     # Populated by sportsball.scoring
     points: float = 0.0
     base_points: float = 0.0
@@ -133,6 +137,10 @@ _ALIASES: dict[str, tuple[str, ...]] = {
     "two_point": ("twopoint", "2pt", "twopt", "twoptconversions", "2pc"),
     "rush_first_downs": ("rushfirstdowns", "rush1d", "r1d", "rushingfirstdowns"),
     "rec_first_downs": ("recfirstdowns", "rec1d", "receivingfirstdowns"),
+    # Projections that are already scored in your league's rules. Supplying
+    # this bypasses the scoring engine entirely for that player.
+    "fantasy_points": ("fantasypoints", "fpts", "points", "projpoints",
+                       "projectedpoints", "pts", "fantasypts"),
 }
 
 _STAT_FIELDS = {f.name for f in fields(StatLine)}
@@ -198,6 +206,12 @@ def parse_projections(
                     default = default_games if canonical == "games" else 0.0
                     setattr(stats, canonical, _to_float(raw, default))
 
+            supplied = None
+            if "fantasy_points" in columns:
+                text = (row.get(columns["fantasy_points"]) or "").strip()
+                if text:
+                    supplied = _to_float(text)
+
             player = Player(
                 name=name,
                 position=(row.get(columns["position"]) or "").strip(),
@@ -205,6 +219,7 @@ def parse_projections(
                 player_id=(row.get(columns.get("player_id", ""), "") or "").strip(),
                 bye=int(_to_float(row.get(columns.get("bye", "")))),
                 stats=stats,
+                supplied_points=supplied,
             )
         except ProjectionError as exc:
             raise ProjectionError(f"line {lineno}: {exc}") from exc

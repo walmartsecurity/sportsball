@@ -48,9 +48,13 @@ from typing import Any, Iterable, Mapping
 
 PROJECTIONS_URL = (
     "https://api.sleeper.com/projections/nfl/{season}"
-    "?season_type=regular&position[]=QB&position[]=RB&position[]=WR"
-    "&position[]=TE&order_by=pts_ppr"
+    "?season_type=regular&grouping=season"
+    "&position[]=QB&position[]=RB&position[]=WR&position[]=TE"
+    "&order_by=pts_ppr"
 )
+# Sleeper's own scored totals, by format. Only useful if the league they were
+# computed for scores the same way yours does.
+POINTS_KEYS = {"ppr": "pts_ppr", "half_ppr": "pts_half_ppr", "std": "pts_std"}
 POSITIONS = ("QB", "RB", "WR", "TE")
 
 # Sleeper stat key -> our column. Several aliases per field because the API is
@@ -75,7 +79,8 @@ STAT_MAP: dict[str, tuple[str, ...]] = {
 }
 TWO_POINT_KEYS = ("pass_2pt", "rush_2pt", "rec_2pt")
 
-OUT_COLS = ["name", "position", "team", "games", "pass_att", "pass_cmp",
+OUT_COLS = ["name", "position", "team", "fantasy_points", "games",
+            "pass_att", "pass_cmp",
             "pass_yds", "pass_td", "int", "rush_att", "rush_yds", "rush_td",
             "targets", "rec", "rec_yds", "rec_td", "rush_first_downs",
             "rec_first_downs", "fumbles_lost", "two_point"]
@@ -138,8 +143,13 @@ def _identity(row: Mapping[str, Any]) -> tuple[str, str, str] | None:
     return name.strip(), position, (team or "FA").strip()
 
 
-def convert(payload: Any, season_games: float | None = None) -> list[dict]:
-    """Sleeper projections -> rows in this tool's CSV schema."""
+def convert(payload: Any, season_games: float | None = None,
+            points_key: str | None = None) -> list[dict]:
+    """Sleeper projections -> rows in this tool's CSV schema.
+
+    ``points_key`` carries one of Sleeper's already-scored totals straight
+    through, which bypasses this tool's scoring engine for those players.
+    """
     out: list[dict] = []
     skipped = 0
     for row in rows_of(payload):
@@ -157,6 +167,9 @@ def convert(payload: Any, season_games: float | None = None) -> list[dict]:
         record["two_point"] = sum(
             _first(stats, (k,)) or 0.0 for k in TWO_POINT_KEYS
         )
+        record["fantasy_points"] = (
+            _first(stats, (points_key,)) if points_key else None
+        )
 
         games = record.get("games")
         if not games or games <= 0:
@@ -170,6 +183,9 @@ def convert(payload: Any, season_games: float | None = None) -> list[dict]:
             if record.get(column) is None:
                 record[column] = ""
 
+        # A blank points column means "score this one yourself".
+        if record.get("fantasy_points") is None:
+            record["fantasy_points"] = ""
         for column in OUT_COLS:
             if record.get(column) is None:
                 record[column] = 0.0
@@ -229,6 +245,10 @@ def main() -> int:
                     help="print the payload's shape and field mapping, write nothing")
     ap.add_argument("--games", type=float, default=None,
                     help="games to assume when Sleeper does not project them")
+    ap.add_argument("--points", choices=sorted(POINTS_KEYS), default=None,
+                    help="carry one of Sleeper's scored totals through instead "
+                         "of scoring their stats under your league's rules. "
+                         "Only correct if that format matches your league")
     ap.add_argument("--limit", type=int, default=320)
     ap.add_argument("--out", "-o", default="sleeper.csv")
     args = ap.parse_args()
@@ -241,7 +261,7 @@ def main() -> int:
         if args.inspect:
             inspect(payload)
             return 0
-        rows = convert(payload, args.games)
+        rows = convert(payload, args.games, POINTS_KEYS.get(args.points or ""))
     except SleeperError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -251,6 +271,11 @@ def main() -> int:
     print(f"wrote {written} players to {args.out}")
     print(f"  first downs projected by Sleeper for {has_fd} players"
           f"{'; the rest are estimated' if has_fd < written else ''}")
+    if args.points:
+        print(f"  WARNING: using Sleeper's {args.points} totals, so this "
+              "league's scoring is NOT applied — no tight end premium, no "
+              "first downs, no video game bonuses. Correct only if your league "
+              "scores exactly that way.")
     return 0
 
 

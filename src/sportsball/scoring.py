@@ -77,7 +77,21 @@ def base_points(player: Player, rules: ScoringRules, model: FirstDownModel) -> f
 
 
 def score_player(player: Player, league: LeagueConfig) -> Player:
-    """Score one player in place and return it."""
+    """Score one player in place and return it.
+
+    A projection that arrives already scored in this league's rules is taken as
+    given. That is the right call when the source computed it under the same
+    scoring -- it will have news this model does not -- but it means the video
+    game bonuses come from *their* model rather than the fitted one here, so a
+    total scored under some other ruleset will be silently wrong for SFB16.
+    """
+    if player.supplied_points is not None:
+        player.points = player.supplied_points
+        player.base_points = player.supplied_points
+        player.bonus_points = 0.0
+        player.bonus_breakdown = {}
+        return player
+
     player.base_points = base_points(player, league.scoring, league.first_downs)
     player.bonus_points, player.bonus_breakdown = project_bonuses(
         player, league.bonuses

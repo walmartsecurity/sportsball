@@ -202,3 +202,54 @@ def test_cli_reports_an_unreachable_api(tmp_path):
     assert result.returncode == 1
     assert "could not reach Sleeper" in result.stderr
     assert "--from-json" in result.stderr
+
+
+# -- carrying Sleeper's own scored totals ----------------------------------
+
+
+def test_scored_totals_are_left_out_by_default(rows):
+    """Sleeper's totals are PPR; SFB16 is not, so they are not used unless asked."""
+    assert all(r["fantasy_points"] == "" for r in rows)
+
+
+def test_scored_totals_can_be_carried_through(payload):
+    out = convert(payload, points_key="pts_ppr")
+    chase = find(out, "Ja'Marr Chase")
+    assert chase["fantasy_points"] == 340.2
+
+
+def test_a_carried_total_is_used_verbatim(payload, sfb16, tmp_path):
+    from sportsball.players import load_projections
+    from sportsball.scoring import score_all
+
+    out = convert(payload, points_key="pts_ppr")
+    path = tmp_path / "sleeper.csv"
+    write_csv(out, path, limit=50)
+    players = {p.name: p for p in score_all(load_projections(path), sfb16)}
+    assert players["Ja'Marr Chase"].points == 340.2
+    assert players["Ja'Marr Chase"].bonus_points == 0.0
+
+
+def test_players_without_a_carried_total_are_still_scored(payload, sfb16, tmp_path):
+    """Bijan has no pts_ppr in the fixture, so the engine has to score him."""
+    from sportsball.players import load_projections
+    from sportsball.scoring import score_all
+
+    out = convert(payload, points_key="pts_ppr")
+    path = tmp_path / "sleeper.csv"
+    write_csv(out, path, limit=50)
+    players = {p.name: p for p in score_all(load_projections(path), sfb16)}
+    bijan = players["Bijan Robinson"]
+    assert bijan.supplied_points is None
+    assert bijan.bonus_points > 0
+
+
+def test_the_cli_warns_when_it_bypasses_your_scoring(tmp_path):
+    out = tmp_path / "s.csv"
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "fetch_sleeper.py"),
+         "--from-json", str(FIXTURE), "--points", "ppr", "--out", str(out)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "NOT applied" in result.stdout
