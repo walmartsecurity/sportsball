@@ -29,9 +29,11 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def app(tmp_path_factory):
+    """An empty board, for the tests that reason about an untouched room."""
     out = tmp_path_factory.mktemp("app") / "app.html"
     subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "build_app.py"), "--out", str(out)],
+        [sys.executable, str(ROOT / "tools" / "build_app.py"),
+         "--no-seed", "--out", str(out)],
         check=True, capture_output=True,
     )
     return out
@@ -490,3 +492,31 @@ def test_the_plan_can_still_take_a_player_under_bidding(app, py_board, tmp_path)
     out = run_js(app, {"roomBids": {pid: round(target.value * 0.3)},
                        "plan": True}, tmp_path)
     assert pid in out["plan"]["additions"]
+
+
+def test_a_bare_build_opens_on_the_real_draft(tmp_path, seed):
+    """The default build must ship the seed.
+
+    An unseeded page renders without complaint and looks right; the only tell
+    is that every "now" price equals list value, because nothing has been sold
+    to reprice against. That is a silent way to hand someone a dead board.
+    """
+    out = tmp_path / "bare.html"
+    subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "build_app.py"), "--out", str(out)],
+        check=True, capture_output=True,
+    )
+    state = run_js(out, {"load": True}, tmp_path)
+    assert state["state"]["myBudget"] == seed["teamEdits"]["you"]["budget"]
+    assert state["state"]["inflation"] > 1.0
+
+
+def test_a_seeded_board_prices_survivors_above_list(seeded_app, py_board, seed,
+                                                    tmp_path):
+    """The whole point of the now price: the room underpaid, so the rest cost more."""
+    gone = {s["id"] for s in seed["sales"]}
+    survivor = next(v.player.player_id for v in py_board.top(60)
+                    if v.player.player_id not in gone)
+    out = run_js(seeded_app, {"load": True, "bids": [survivor]}, tmp_path)
+    baseline = run_js(seeded_app, {"bids": [survivor]}, tmp_path)
+    assert out["bids"][0]["effective"] > baseline["bids"][0]["effective"]

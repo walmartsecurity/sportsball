@@ -27,6 +27,11 @@ from sportsball.scoring import score_all, upside_points
 from sportsball.valuation import value_players
 
 TEMPLATE = Path(__file__).parent / "app_template.html"
+# The board opens on the real draft in progress, not an empty room. A bare
+# build shipping an unseeded page looks identical to a seeded one until you
+# notice every "now" price equals list value, so make it the default.
+DEFAULT_SEED = (Path(__file__).resolve().parents[1]
+                / "src" / "sportsball" / "data" / "seed_draft.json")
 
 
 def build_payload(league_name: str, projections: str | None, pool: int,
@@ -95,13 +100,18 @@ def main() -> int:
     ap.add_argument("--projections", "-p", default=None)
     ap.add_argument("--pool", type=int, default=280,
                     help="how many players to bake in (default 280)")
-    ap.add_argument("--seed", default=None,
+    ap.add_argument("--seed", default=str(DEFAULT_SEED),
                     help="JSON of sales and team budgets to open with "
-                         "(see tools/seed_draft.py)")
+                         "(see tools/seed_draft.py); defaults to the bundled "
+                         "board, pass --no-seed for an empty one")
+    ap.add_argument("--no-seed", dest="seed", action="store_const", const=None,
+                    help="open on an empty board instead of the bundled one")
     ap.add_argument("--out", "-o", default="app.html")
     args = ap.parse_args()
 
     seed = json.loads(Path(args.seed).read_text()) if args.seed else None
+    if args.seed and not seed.get("sales"):
+        raise SystemExit(f"{args.seed} has no sales in it")
     payload = build_payload(args.league, args.projections, args.pool, seed)
     html = TEMPLATE.read_text()
     if "__PAYLOAD__" not in html:
