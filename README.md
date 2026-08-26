@@ -109,16 +109,30 @@ player at his rank has historically scored, leaving the ranking untouched:
 python tools/project_from_nflverse.py --calibrate-spread --out projections.csv
 ```
 
+The rank is his rank **within his own position**, against that position's own
+history. Doing it on one pooled ranking was wrong in two ways at once:
+
+- **Positions do not share a shape.** The fall from the best quarterback to the
+  tenth is nothing like the fall from the best running back to the tenth. A
+  pooled curve imposes the blend of those shapes on all of them, flattening the
+  steep positions and steepening the flat ones.
+- **A pooled curve cannot correct a position's level**, because it never
+  compares a position against itself. A tight end ranked 40th overall is handed
+  the 40th best score from a list that is mostly wide receivers — so whatever
+  the model believes tight ends are worth passes straight through the
+  correction untouched.
+
+Both land directly on replacement level, which is computed per position, and
+so on every dollar figure downstream. The run reports one line per position —
+where its top projection started and where the curve put it, and how many
+players were mapped onto how many ranks of history — so the size of the
+correction is visible rather than assumed. A position the history has nothing
+for is left on the model's own scale and says so out loud, rather than being
+quietly left behind while its rivals move.
+
 It moves less than the point gap suggests, because normalising to a fixed
 budget absorbs most of a proportional squeeze — the top of the board rises
-about 10–15% and the middle gives back about 10%:
-
-| player | default | calibrated |
-|---|---|---|
-| Puka Nacua | $356 | **$406** (+14%) |
-| Jaxon Smith-Njigba | $295 | $333 (+13%) |
-| Bijan Robinson | $285 | $310 (+9%) |
-| Brock Bowers | $206 | $187 (−9%) |
+roughly 10–15% and the middle gives some back.
 
 It is opt-in because the trade is real: this makes individual projections
 *worse* by squared error, since it predicts a 720-point season for whoever
