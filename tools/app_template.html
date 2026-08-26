@@ -169,10 +169,10 @@ button { font: inherit; cursor: pointer; }
 /* ---------- board ---------- */
 .scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
-th { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--line); font-family: "Barlow Condensed", sans-serif; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; font-weight: 600; color: var(--ink-3); white-space: nowrap; }
+th { text-align: right; padding: 7px 6px; border-bottom: 1px solid var(--line); font-family: "Barlow Condensed", sans-serif; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; font-weight: 600; color: var(--ink-3); white-space: nowrap; }
 th.col-name, th.col-pos { text-align: left; }
 th:nth-child(1), th:nth-child(2) { text-align: left; }
-td { padding: 7px 8px; border-bottom: 1px solid var(--line-soft); text-align: right; white-space: nowrap; }
+td { padding: 7px 6px; border-bottom: 1px solid var(--line-soft); text-align: right; white-space: nowrap; }
 td.col-name, td.col-pos { text-align: left; }
 td:nth-child(1), td:nth-child(2) { text-align: left; }
 tbody tr { cursor: pointer; }
@@ -197,6 +197,12 @@ tbody tr.sel { background: var(--accent-soft); }
 .sale input[type=number] { width: 92px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); color: var(--ink); font-family: "IBM Plex Mono", monospace; font-weight: 600; }
 .sale input[type=text] { width: 110px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); color: var(--ink); }
 .warn { color: var(--bad); font-size: 13px; }
+.verdict { font-size: 14px; margin: 0 0 10px; color: var(--ink-2); }
+.verdict.good { color: var(--good); }
+.verdict.bad { color: var(--bad); }
+td.rng { font-size: 13px; }
+.diff { font-size: 12px; margin-left: 4px; font-weight: 400; }
+.reach { color: var(--accent); font-weight: 600; }
 
 /* ---------- roster ---------- */
 .slots { display: flex; flex-direction: column; gap: 3px; }
@@ -276,8 +282,11 @@ tbody tr.gone .pname { color: var(--ink-3); }
      fit without a sideways scroll. Everything else gives way. */
   .exp { display: none; }
   .pteam { display: none; }
-  .col-name { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; }
-  th, td { padding: 7px 4px; font-size: 13px; }
+  .cur { display: none; }
+  .diff { display: none; }
+  td.rng { font-size: 11px; }
+  .col-name { max-width: 28vw; overflow: hidden; text-overflow: ellipsis; }
+  th, td { padding: 7px 2px; font-size: 13px; }
   .pos { min-width: 26px; padding: 2px 3px; }
   th, td { padding: 7px 5px; }
   .maxbid .num { font-size: 32px; }
@@ -312,7 +321,9 @@ tbody tr.gone .pname { color: var(--ink-3); }
           <thead><tr>
             <th class="c-hide-sm">#</th><th class="col-name">Player</th><th class="col-pos">Pos</th>
             <th class="c-hide-sm">Pts</th><th class="c-hide-sm">VOR</th>
-            <th>Value</th><th class="c-hide-sm">Now</th><th>Bid</th><th>Diff</th>
+            <th class="c-hide-sm">Now</th>
+            <th>Goes<span class="c-hide-sm"> for</span></th>
+            <th><span class="c-hide-sm">Your </span>Max</th><th>Bid</th>
           </tr></thead>
           <tbody id="board"></tbody>
         </table>
@@ -613,6 +624,136 @@ function maxBid(p) {
   const rate = Math.max(DPP, personalRate(p.id));
   const vor = Math.max(p.vor, 0) * (wouldStart(p) ? 1 : L.benchWeight);
   return Math.min(cap, Math.max(L.minBid, Math.round(L.minBid + vor * rate)));
+}
+
+/* ---------------- what he will go for ----------------
+   A single price is the wrong shape for an auction. The model's number is a
+   point estimate of something that happens once, in a room of twelve people,
+   and quoting it alone invites the two mistakes that cost the most: passing on
+   a player who was never going to reach your number, and sitting in a bidding
+   war you had already lost. So every player carries a low, a likely and a
+   high, and the useful reading is where your walk-away price falls against
+   them.
+
+   The width has two parts. How uncertain *this player* is comes free from the
+   ceiling model -- a receiver whose points come from explosive plays draws a
+   wider spread of opinion than one with the same projection built out of
+   volume -- and is baked in as `sig`, scaled against the typical drafted
+   player so an ordinary player gets the ordinary width. How loose *this room*
+   is gets measured from the sales already on the board, with a stated prior
+   carrying it until there are enough of them to say.
+
+   The scatter is measured in points rather than dollars, by running each sale
+   backwards through the pricing identity, because that is where it gets
+   applied; measured in dollars and applied to points it would be magnified a
+   second time on the way back out. The dollar width then falls out of the
+   identity, which is what makes a stud's range fifteen dollars wide and a
+   flier's two: dollars track value over replacement, so the same proportional
+   wobble is worth real money at the top of the board and almost none at the
+   bottom.
+
+   See sportsball/bidrange.py; tests/test_app.py pins the two together. */
+
+const RANGE_Z = 1.0;              // one sigma: the middle two thirds
+const ROOM_SIGMA_PRIOR = 0.10;    // before this room has shown us anything
+const ROOM_SIGMA_WEIGHT = 8;      // sales before the measurement outweighs it
+const HABIT_WEIGHT = 6;           // sales before a position's habit is taken flat
+const MEANINGFUL_SHARE = 0.02;    // cheap sales say nothing about discipline
+
+/* How far this room's implied opinion sits from the model's, on the log scale.
+   Both sides are read off the pre-draft board so the ruler does not move as
+   the draft inflates, and the spread is taken around the room's own average
+   because the average shift is already carried by the positional habit. */
+function roomScatter() {
+  const floor = Math.max(L.minBid, L.budget * MEANINGFUL_SHARE);
+  const rate = DATA.dollarsPerPoint;
+  const rs = [];
+  if (rate > 0) {
+    for (const s of sales) {
+      const p = P.get(s.id);
+      if (!p || p.val < floor || s.price < floor || p.pts <= 0) continue;
+      const implied = (REPL[p.pos] ?? 0) + (s.price - L.minBid) / rate;
+      if (implied > 0) rs.push(Math.log(implied / p.pts));
+    }
+  }
+  const n = rs.length;
+  if (n < 2) return { sigma: ROOM_SIGMA_PRIOR, n };
+  const mean = rs.reduce((a, r) => a + r, 0) / n;
+  const measured = rs.reduce((a, r) => a + (r - mean) ** 2, 0) / n;
+  const blended = (n * measured + ROOM_SIGMA_WEIGHT * ROOM_SIGMA_PRIOR ** 2)
+                / (n + ROOM_SIGMA_WEIGHT);
+  return { sigma: Math.sqrt(blended), n };
+}
+
+/* What the room pays for a position, shrunk toward paying list -- three cheap
+   running backs should not reprice every running back on the board. */
+function positionHabit(pos, room) {
+  const habit = (room || roomPricing())[pos];
+  if (!habit) return 1;
+  return (habit.n * habit.ratio + HABIT_WEIGHT) / (habit.n + HABIT_WEIGHT);
+}
+
+/* A price needs somebody able to pay it. Early this is far above anything the
+   model quotes; late, with the wallets empty, it is what actually decides
+   what the last useful players cost. */
+function richestBid() {
+  return teamList().reduce((a, t) => Math.max(a, maxBidOf(t)), 0);
+}
+
+/* The room-level figures a range needs, worked out once for a whole scan. */
+const rangeContext = () => ({
+  scatter: roomScatter().sigma, ceiling: richestBid(), room: roomPricing(),
+});
+
+function bidRange(p, ctx) {
+  ctx = ctx || rangeContext();
+  const tilt = DATA.sigmaRef > 0 ? (p.sig ?? DATA.sigmaRef) / DATA.sigmaRef : 1;
+  const sigma = ctx.scatter * tilt;
+  const habit = positionHabit(p.pos, ctx.room);
+  const repl = REPL[p.pos] ?? 0;
+  const dollars = pts => L.minBid + Math.max(pts - repl, 0) * DPP;
+
+  let low = habit * dollars(p.pts * Math.exp(-RANGE_Z * sigma));
+  let high = habit * dollars(p.pts * Math.exp(RANGE_Z * sigma));
+  let likely = habit * priceOf(p);
+
+  // Nobody bids more than the fattest wallet allows, and a player already
+  // under the hammer will not go backwards from the bid standing on him.
+  const ceiling = Math.max(ctx.ceiling, L.minBid);
+  const floor = Math.max(L.minBid, roomBids[p.id] ?? 0);
+  low = Math.min(Math.max(low, floor), ceiling);
+  high = Math.min(Math.max(high, low), ceiling);
+  likely = Math.min(Math.max(likely, low), high);
+
+  low = Math.round(low); high = Math.round(high); likely = Math.round(likely);
+  const mb = maxBid(p);
+  return {
+    low, likely, high, max: mb,
+    atMinimum: high <= low,
+    pricedOut: mb < low,
+    shouldWin: mb >= high,
+  };
+}
+
+/* Every range at once, paying for the room-level figures a single time. */
+function bidRanges(rows) {
+  const ctx = rangeContext();
+  const out = new Map();
+  for (const p of rows) out.set(p.id, bidRange(p, ctx));
+  return out;
+}
+
+/* Where your walk-away sits against the room's range, in one line. */
+function rangeVerdict(r) {
+  if (r.max < 1) return "Not worth a bid from you at these prices.";
+  if (r.atMinimum) return "Minimum-bid territory — nothing here is worth a raise.";
+  if (r.pricedOut)
+    return `Priced out — the room starts around ${money(r.low)} and you stop at ${money(r.max)}.`;
+  if (r.shouldWin)
+    return `Should be yours — ${money(r.max)} covers the top of the range, bidding war included.`;
+  if (r.max >= r.likely)
+    return `Winnable — you can pay the ${money(r.likely)} he ought to go for, but not a war.`;
+  return `Long shot — he ought to reach ${money(r.likely)} and you stop at ${money(r.max)}.`;
 }
 
 /* ---------------- what to chase ----------------
@@ -970,6 +1111,8 @@ function targetRoster() {
 
 /* ---------------- rendering ---------------- */
 const money = v => "$" + Math.round(v).toLocaleString();
+/* The same figure, with a dollar sign the phone layout can drop. */
+const money_ = v => '<span class="cur">$</span>' + Math.round(v).toLocaleString();
 const el = id => document.getElementById(id);
 
 function render() {
@@ -1021,11 +1164,16 @@ function renderBoard() {
     return true;
   }).slice(0, 120);
 
+  // The room-level figures behind a range are worked out once for the whole
+  // page, not once per row.
+  const spans = bidRanges(rows.filter(p => !gone.has(p.id)));
+
   el("board").innerHTML = rows.map((p, i) => {
     const sold = gone.has(p.id);
     const bid = bidOf(p);
+    const r = spans.get(p.id);
     const diff = pctVsValue(p);
-    const diffCell = diff === null ? '<span class="muted">—</span>'
+    const diffCell = diff === null ? ""
       : `<span class="${diff > 0.02 ? "over" : diff < -0.02 ? "under" : "muted"}">`
         + `${diff > 0 ? "+" : ""}${Math.round(diff * 100)}%</span>`;
     const source = bidSource(p);
@@ -1039,13 +1187,24 @@ function renderBoard() {
       <td class="col-pos"><span class="pos ${p.pos}">${p.pos}</span></td>
       <td class="mono c-hide-sm">${Math.round(p.pts)}</td>
       <td class="mono muted c-hide-sm">${Math.round(p.vor)}</td>
-      <td class="mono muted">${money(p.val)}</td>
       <td class="mono c-hide-sm${nowIsLive(p) ? " live-px" : " muted"}">${
         sold ? "—" : money(nowPrice(p))}</td>
-      <td class="money">${bidCell}</td>
-      <td class="mono">${diffCell}</td>
+      <td class="mono rng"${r ? ` title="likely ${money(r.likely)} · your max ${money(r.max)}"` : ""}>${
+        r ? rangeCell(r) : '<span class="muted">—</span>'}</td>
+      <td class="mono${r && !r.pricedOut ? " reach" : " muted"}">${
+        r ? money_(r.max) : "—"}</td>
+      <td class="money">${bidCell}${
+        bid === null ? "" : ` <span class="mono diff">${diffCell}</span>`}</td>
     </tr>`;
   }).join("");
+}
+
+/* The span, written the way you would say it out loud, and coloured by where
+   your own number falls in it: out of reach, or comfortably yours. */
+function rangeCell(r) {
+  if (r.atMinimum) return `<span class="muted">${money_(r.low)}</span>`;
+  const cls = r.pricedOut ? "over" : r.shouldWin ? "under" : "";
+  return `<span class="${cls}">${money_(r.low)}–${Math.round(r.high).toLocaleString()}</span>`;
 }
 
 function renderDetail() {
@@ -1072,6 +1231,7 @@ function renderDetail() {
   const now = nowPrice(p);
   const live = nowIsLive(p);
   const cap = hardCap();
+  const r = bidRange(p);
   d.innerHTML = `
     <div class="detail-top">
       <span class="detail-name">${p.name}</span>
@@ -1084,12 +1244,18 @@ function renderDetail() {
     <div class="maxbid">
       <div><div class="lbl">Your walk-away price</div><div class="num">${money(mb)}</div></div>
       <div class="facts">
+        <div><div class="lbl">He goes for</div>
+             <div class="mono ${r.pricedOut ? "over" : r.shouldWin ? "under" : ""}">${
+               r.atMinimum ? money(r.low)
+               : `${money(r.likely)} <span class="muted">(${money(r.low)}–${
+                   Math.round(r.high).toLocaleString()})</span>`}</div></div>
         <div><div class="lbl">${live ? "Standing bid" : "Market now"}</div>
              <div class="mono${live ? " live-px" : ""}">${money(now)}</div></div>
         <div><div class="lbl">Pre-draft list</div><div class="mono">${money(p.val)}</div></div>
         <div><div class="lbl">Wallet allows</div><div class="mono">${money(cap)}</div></div>
       </div>
     </div>
+    <p class="verdict ${r.pricedOut ? "bad" : r.shouldWin ? "good" : ""}">${rangeVerdict(r)}</p>
     ${mb <= L.minBid ? '<p class="warn">Not worth a bid from you at these prices — the money buys more elsewhere.</p>' : ""}
     <div class="sale">
       <input type="number" id="price" min="${L.minBid}" step="1" placeholder="price"

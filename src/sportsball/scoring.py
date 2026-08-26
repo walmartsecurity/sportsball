@@ -116,23 +116,38 @@ def score_all(players: Iterable[Player], league: LeagueConfig) -> list[Player]:
     return scored
 
 
+def season_sigma(player: Player) -> float:
+    """Log-scale spread of the player's season outcome.
+
+    The season is modelled as lognormal with the projection as its median.
+    Players whose value leans on the high-variance bonus categories get more
+    spread, because that is where their points come from: a receiver priced on
+    explosive plays can miss by a mile in either direction, while one priced on
+    volume mostly cannot.
+
+    Returned as sigma rather than a coefficient of variation so callers can
+    quote any quantile they like -- the ceiling below is one such quantile, and
+    the bid range in :mod:`sportsball.bidrange` is another.
+    """
+    if player.points <= 0.0:
+        return 0.0
+    bonus_share = player.bonus_points / player.points
+    cv = _SEASON_CV_BASE + _SEASON_CV_BONUS_SLOPE * bonus_share
+    return math.sqrt(math.log(1.0 + cv * cv))
+
+
 def upside_points(player: Player, league: LeagueConfig) -> float:
     """A ceiling estimate for the player's season.
 
     Season totals are far less volatile than single games, but SFB is a
     tournament: only the top of the overall leaderboard matters, so a roster
-    built on medians is playing the wrong game. The season outcome is modelled
-    as lognormal with the projection as its median, and this returns the
-    quantile ``league.upside_sigma`` standard deviations up (0.85 is roughly
-    the 80th percentile). Players whose value leans on the high-variance bonus
-    categories get more spread, because that is where their points come from.
+    built on medians is playing the wrong game. This returns the quantile
+    ``league.upside_sigma`` standard deviations up the distribution described
+    by :func:`season_sigma` (0.85 is roughly the 80th percentile).
     """
     if player.points <= 0.0:
         return player.points
-    bonus_share = player.bonus_points / player.points
-    cv = _SEASON_CV_BASE + _SEASON_CV_BONUS_SLOPE * bonus_share
-    sigma = math.sqrt(math.log(1.0 + cv * cv))
-    return player.points * math.exp(league.upside_sigma * sigma)
+    return player.points * math.exp(league.upside_sigma * season_sigma(player))
 
 
 def valuation_points(player: Player, league: LeagueConfig) -> float:
