@@ -21,9 +21,10 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from sportsball.bidrange import reference_sigma
 from sportsball.config import load_league
 from sportsball.players import load_projections
-from sportsball.scoring import score_all, upside_points
+from sportsball.scoring import score_all, season_sigma, upside_points
 from sportsball.valuation import value_players
 
 TEMPLATE = Path(__file__).parent / "app_template.html"
@@ -53,6 +54,10 @@ def build_payload(league_name: str, projections: str | None, pool: int,
             "val": round(v.value, 1),
             "bonus": round(p.bonus_points, 1),
             "ceil": round(upside_points(p, league), 1),
+            # How wide his season is, on the log scale. The bid range tilts
+            # its width by this, so a player whose points come from big plays
+            # gets the wider range he deserves.
+            "sig": round(season_sigma(p), 4),
         })
 
     # Recompute the rate from the rounded figures the browser will actually
@@ -90,6 +95,10 @@ def build_payload(league_name: str, projections: str | None, pool: int,
         },
         "replacement": {k: round(v, 1) for k, v in board.levels.by_position.items()},
         "dollarsPerPoint": dpp,
+        # The spread of a typical drafted player, which is what the per-player
+        # spreads above are measured against. Baked rather than derived in the
+        # browser so both implementations divide by exactly the same number.
+        "sigmaRef": round(reference_sigma(board, league.drafted_players), 4),
         "players": rows,
     }
 

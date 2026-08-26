@@ -675,20 +675,34 @@ def backtest(cache: Path, seasons: list[int], games: float) -> None:
             print(f"{target:<8d}{label:18s}{rho:10.3f}{mae:8.1f}{trho:12.3f}")
 
 
-def historical_rank_curve(stats: pd.DataFrame, league) -> list[float]:
-    """Points scored by the Nth best player, averaged over past seasons."""
+def historical_rank_curves(stats: pd.DataFrame, league) -> dict[str, list[float]]:
+    """Points scored by the Nth best player *at each position*, by season average.
+
+    One curve per position rather than one for the whole league. Positions do
+    not share a shape: the gap from the best quarterback to the tenth is
+    nothing like the gap from the best running back to the tenth, and pooling
+    them into a single ranking hides that. It also lets a position's overall
+    level be wrong -- if the model systematically underrates tight ends, a
+    pooled curve cannot see it, because a tight end who ranks 40th overall is
+    simply handed the 40th best score in a list that is mostly wide receivers.
+    """
     scored = stats.copy()
     scored['pts'] = _league_points_from(scored, league)
-    curves = [sorted(d.pts.tolist(), reverse=True)
-              for _, d in scored.groupby('season')]
-    if not curves:
-        return []
-    depth = min(len(c) for c in curves)
-    return [float(np.mean([c[i] for c in curves])) for i in range(depth)]
+    out: dict[str, list[float]] = {}
+    for position, rows in scored.groupby('position'):
+        curves = [sorted(d.pts.tolist(), reverse=True)
+                  for _, d in rows.groupby('season')]
+        depth = min((len(c) for c in curves), default=0)
+        if depth:
+            out[str(position)] = [
+                float(np.mean([c[i] for c in curves])) for i in range(depth)
+            ]
+    return out
 
 
-def calibrate_spread(proj: pd.DataFrame, curve: list[float], league) -> pd.DataFrame:
-    """Keep the model's ordering, adopt history's spread.
+def calibrate_spread(proj: pd.DataFrame, curves: Mapping[str, list[float]],
+                     league, *, on_note=None) -> pd.DataFrame:
+    """Keep the model's ordering, adopt history's spread -- position by position.
 
     Shrinking every player toward a positional prior is what makes individual
     projections accurate, and it necessarily produces a distribution narrower
@@ -703,6 +717,22 @@ def calibrate_spread(proj: pd.DataFrame, curve: list[float], league) -> pd.DataF
     what the player at his rank has historically scored, which leaves the
     ranking untouched and only changes the shape.
 
+    The ranking is *within his own position*, against that position's own
+    history. Doing it on one pooled ranking was wrong in two ways at once.
+    Positions have different shapes -- the fall from the best quarterback to
+    the tenth is not the fall from the best running back to the tenth -- and a
+    pooled curve imposes the average of those shapes on all of them. Worse, it
+    cannot correct a position's *level*, because it never compares a position
+    against itself: a tight end who ranks 40th overall is simply handed the
+    40th best score in a list that is mostly wide receivers, so whatever the
+    model thinks tight ends are worth survives the correction untouched. Both
+    of those land directly on replacement level, which is computed per
+    position, and so on every dollar figure downstream.
+
+    A position with no history in the curves is left exactly as the model had
+    it, and reported through ``on_note`` -- silently leaving it on the model's
+    scale while its rivals move onto history's would misprice it against them.
+
     The trade is real and worth stating: this makes individual projections
     *worse* by squared error, since it predicts a 720-point season for whoever
     happens to rank first. It makes the board better shaped for an auction. It
@@ -710,14 +740,25 @@ def calibrate_spread(proj: pd.DataFrame, curve: list[float], league) -> pd.DataF
     rather than transforming it, because normalising to a fixed budget absorbs
     most of a proportional squeeze.
     """
-    if not curve:
+    note = on_note or (lambda _msg: None)
+    if not curves:
         return proj
     proj = proj.copy()
-    proj['fantasy_points'] = _league_points(proj)
-    order = proj.fantasy_points.rank(ascending=False, method='first').astype(int)
-    proj['fantasy_points'] = [
-        curve[min(rank, len(curve)) - 1] for rank in order
-    ]
+    # Score under the league being calibrated against, not a hardcoded one:
+    # the curves were built with the same rules, and the two sides of a
+    # rank-for-rank mapping have to be measured with the same ruler.
+    proj['fantasy_points'] = _league_points_from(proj, league)
+    for position, rows in proj.groupby('position'):
+        curve = curves.get(str(position))
+        if not curve:
+            note(f"{position}: no history in the curves, left uncalibrated "
+                 f"({len(rows)} players)")
+            continue
+        order = rows.fantasy_points.rank(ascending=False, method='first').astype(int)
+        after = [curve[min(rank, len(curve)) - 1] for rank in order]
+        note(f"{position}: top {rows.fantasy_points.max():.0f} -> {max(after):.0f} pts, "
+             f"{len(rows)} players onto {len(curve)} ranks of history")
+        proj.loc[rows.index, 'fantasy_points'] = after
     return proj
 
 
@@ -828,9 +869,10 @@ def main() -> int:
     ap.add_argument("--calibrate", action="store_true",
                     help="check projected big plays against what happened, and exit")
     ap.add_argument("--calibrate-spread", action="store_true",
-                    help="rescale points onto the historical distribution by rank. "
-                         "Leaves the ordering alone; widens the board, which "
-                         "raises the top by roughly 10-15%%")
+                    help="rescale points onto the historical distribution by "
+                         "rank within each position. Leaves the ordering "
+                         "alone; widens the board, which raises the top by "
+                         "roughly 10-15%%")
     args = ap.parse_args()
 
     cache = fetch(args.season, args.history, Path(args.cache_dir))
@@ -847,8 +889,10 @@ def main() -> int:
         from sportsball.config import load_league
 
         league = load_league(args.league)
-        curve = historical_rank_curve(seasonal_stats(cache), league)
-        proj = calibrate_spread(proj, curve, league)
+        curves = historical_rank_curves(seasonal_stats(cache), league)
+        print("calibrating each position onto its own history:")
+        proj = calibrate_spread(proj, curves, league,
+                                on_note=lambda msg: print(f"  {msg}"))
     written = to_csv(proj, args.season, cache, Path(args.out), args.limit)
     rookies = int(proj.rookie.sum()) if 'rookie' in proj else 0
     print(f"wrote {written} players to {args.out} "

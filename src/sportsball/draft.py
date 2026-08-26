@@ -52,6 +52,10 @@ class DraftState:
     players: list[Player]
     my_team: str = "me"
     sales: list[Sale] = field(default_factory=list)
+    # Players under the hammer right now, at the bid standing on them. Not
+    # sales: he is still gettable, and the standing bid is the best estimate
+    # of what it will take, so it floors his range rather than ending it.
+    open_bids: dict[str, float] = field(default_factory=dict)
     _levels: ReplacementLevels | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -171,6 +175,31 @@ class DraftState:
     def team_spent(self, team: str) -> float:
         return sum(s.price for s in self.sales if s.team == team)
 
+    def team_max_bid(self, team: str) -> float:
+        """Most this team can bid and still fill every remaining spot."""
+        open_slots = self.league.roster_size - len(self.team_roster(team))
+        if open_slots <= 0:
+            return 0.0
+        budget = self.league.budget - self.team_spent(team)
+        return budget - (open_slots - 1) * self.league.min_bid
+
+    def richest_bid(self) -> float:
+        """The most any single team in the room can still put up.
+
+        A hard ceiling on what a player can sell for, because a price needs
+        somebody able to pay it. Early on this is far above anything the model
+        quotes and never binds; late, with every wallet nearly empty, it is the
+        number that actually decides what the last useful players cost.
+
+        Teams that have not bought anything are untouched by definition, so
+        they need no bookkeeping -- there just have to be some.
+        """
+        best = max((self.team_max_bid(t) for t in self.teams_seen()), default=0.0)
+        if len(self.teams_seen()) < self.league.teams:
+            untouched = self.league.budget - (self.league.roster_size - 1) * self.league.min_bid
+            best = max(best, untouched)
+        return best
+
     def team_roster(self, team: str) -> list[Player]:
         return [self._by_id[s.player_id] for s in self.sales if s.team == team]
 
@@ -249,6 +278,28 @@ class DraftState:
         from .suggest import room_pricing as _room
 
         return _room(self)
+
+    def bid_range(self, player: Player, board: ValuationBoard | None = None,
+                  *, exact: bool = False):
+        """Low, likely and high sale price for one player, plus your max.
+
+        ``exact`` swaps the closed-form walk-away for the integer program,
+        which is what you want when the question is about one player and you
+        are about to act on the answer. See :mod:`sportsball.bidrange`.
+        """
+        from .bidrange import bid_range as _range
+
+        board = board or self.board()
+        top = self.max_bid_for(player, board) if exact else None
+        return _range(self, board, player, max_bid=top)
+
+    def bid_ranges(self, board: ValuationBoard | None = None,
+                   players: Sequence[Player] | None = None,
+                   limit: int | None = None):
+        """Ranges across the board. See :mod:`sportsball.bidrange`."""
+        from .bidrange import bid_ranges as _ranges
+
+        return _ranges(self, board or self.board(), players, limit)
 
     def pacing(self, any_edge: bool = False) -> str:
         from .suggest import pacing as _pacing

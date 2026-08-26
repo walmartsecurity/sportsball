@@ -704,3 +704,148 @@ def test_the_app_never_calls_a_browser_modal(app):
     banned = [m.group(0) for m in
               re.finditer(r"(?<![\w.])(?:window\.)?(confirm|alert|prompt)\s*\(", code)]
     assert banned == [], f"browser modal in the app: {banned}"
+
+
+# -- bid ranges, in both implementations ------------------------------------
+
+# The franchises an unseeded board ships with. Any other name is a team the
+# app has never heard of, and it grows the room to make space for it -- which
+# is the right behaviour live and the wrong one in a comparison, because the
+# Python side prices a league of exactly `teams` teams.
+APP_TEAMS = ["you"] + [f"Team {i}" for i in range(1, 12)]
+
+
+def _py_ranges(sfb16, scored, sales, ids, room_bids=None):
+    from sportsball.bidrange import bid_ranges
+
+    state = _py_state(sfb16, scored, sales)
+    state.open_bids.update(room_bids or {})
+    board = state.board()
+    players = [state._by_id[i] for i in ids]
+    return {r.player.player_id: r for r in bid_ranges(state, board, players)}
+
+
+def test_fresh_ranges_match_python(app, sfb16, scored, py_board, tmp_path):
+    """The width, the shift and the clamps, all against the reference."""
+    ids = [v.player.player_id for v in py_board.top(10)]
+    out = run_js(app, {"ranges": ids}, tmp_path)
+    py = _py_ranges(sfb16, scored, [], ids)
+    for row in out["ranges"]:
+        ref = py[row["id"]]
+        # The payload rounds points and replacement to a decimal place, so the
+        # two agree to a dollar rather than exactly.
+        assert row["low"] == pytest.approx(ref.low, abs=1), row["id"]
+        assert row["likely"] == pytest.approx(ref.likely, abs=1), row["id"]
+        assert row["high"] == pytest.approx(ref.high, abs=1), row["id"]
+
+
+def test_ranges_mid_draft_match_python(app, sfb16, scored, py_board, tmp_path):
+    """With sales on the board, both the scatter and the habit are in play."""
+    sold = py_board.top(14)
+    sales = [{"id": v.player.player_id, "price": max(round(v.value * f), 1),
+              "team": APP_TEAMS[i % len(APP_TEAMS)]}
+             for i, (v, f) in enumerate(zip(sold, [1.4, 0.6] * 7))]
+    ids = [v.player.player_id for v in py_board.top(30)[14:24]]
+    out = run_js(app, {"sales": sales, "ranges": ids}, tmp_path)
+    py = _py_ranges(sfb16, scored, sales, ids)
+    for row in out["ranges"]:
+        ref = py[row["id"]]
+        assert row["low"] == pytest.approx(ref.low, abs=1), row["id"]
+        assert row["high"] == pytest.approx(ref.high, abs=1), row["id"]
+
+
+def test_mid_draft_prices_match_python(app, sfb16, scored, py_board, tmp_path):
+    """Repricing against the money left, not just the direction it moved.
+
+    The suite pinned pre-draft prices and the *sign* of inflation, which left
+    room for the two implementations to disagree about the live rate itself.
+    """
+    sold = py_board.top(10)
+    sales = [{"id": v.player.player_id, "price": max(round(v.value * 1.5), 1),
+              "team": APP_TEAMS[i % len(APP_TEAMS)]}
+             for i, v in enumerate(sold)]
+    ids = [v.player.player_id for v in py_board.top(24)[10:20]]
+    out = run_js(app, {"sales": sales, "prices": ids}, tmp_path)
+
+    state = _py_state(sfb16, scored, sales)
+    board = state.board()
+    assert out["state"]["dpp"] == pytest.approx(board.dollars_per_point, rel=1e-3)
+    for pid, js_price in zip(ids, out["prices"]):
+        assert js_price == pytest.approx(board.get(pid).price, rel=1e-3), pid
+
+
+def test_the_measured_scatter_matches_python(app, sfb16, scored, py_board, tmp_path):
+    sold = py_board.top(12)
+    sales = [{"id": v.player.player_id, "price": max(round(v.value * f), 1),
+              "team": "x"}
+             for v, f in zip(sold, [1.5, 0.5] * 6)]
+    ids = [py_board.top(20)[19].player.player_id]
+    out = run_js(app, {"sales": sales, "ranges": ids}, tmp_path)
+
+    from sportsball.bidrange import room_scatter
+
+    sigma, n = room_scatter(_py_state(sfb16, scored, sales))
+    assert out["scatter"]["n"] == n
+    assert out["scatter"]["sigma"] == pytest.approx(sigma, rel=1e-2)
+
+
+def test_the_shrunk_habit_matches_python(app, sfb16, scored, py_board, tmp_path):
+    from sportsball.bidrange import position_habit
+
+    tes = [v for v in py_board if v.position == "TE"][:5]
+    sales = [{"id": v.player.player_id, "price": max(round(v.value * 0.6), 1),
+              "team": "x"} for v in tes]
+    out = run_js(app, {"sales": sales, "habits": ["TE", "WR"]}, tmp_path)
+    state = _py_state(sfb16, scored, sales)
+    assert out["habits"]["TE"] == pytest.approx(position_habit(state, "TE"), rel=1e-3)
+    assert out["habits"]["WR"] == 1.0
+
+
+def test_the_richest_wallet_matches_python(app, sfb16, scored, py_board, tmp_path):
+    sales = [{"id": py_board.top(1)[0].player.player_id, "price": 900,
+              "team": "spendthrift"}]
+    out = run_js(app, {"sales": sales, "ranges": []}, tmp_path)
+    state = _py_state(sfb16, scored, sales)
+    assert out["richest"] == pytest.approx(state.richest_bid())
+
+
+def test_scanning_agrees_with_asking_one_at_a_time(app, py_board, tmp_path):
+    ids = [v.player.player_id for v in py_board.top(8)]
+    out = run_js(app, {"ranges": ids}, tmp_path)
+    for row in out["ranges"]:
+        assert row["alone"]["low"] == row["low"]
+        assert row["alone"]["high"] == row["high"]
+        assert row["alone"]["likely"] == row["likely"]
+
+
+def test_a_standing_bid_floors_the_range(app, py_board, tmp_path):
+    """He will not go backwards from the money already on him."""
+    pid = py_board.top(30)[25].player.player_id
+    free = run_js(app, {"ranges": [pid]}, tmp_path)["ranges"][0]
+    bid = free["high"] + 40
+    held = run_js(app, {"roomBids": {pid: bid}, "ranges": [pid]}, tmp_path)["ranges"][0]
+    assert held["low"] >= bid
+    assert held["likely"] >= held["low"]
+
+
+def test_the_range_is_capped_by_what_the_room_can_pay(app, py_board, sfb16, tmp_path):
+    """Twelve teams down to their last few dollars cap everything left."""
+    ids = [v.player.player_id for v in py_board.top(260)]
+    sales, i = [], 0
+    for team in APP_TEAMS:
+        for _ in range(sfb16.roster_size - 2):
+            sales.append({"id": ids[i], "price": 1, "team": team})
+            i += 1
+    out = run_js(app, {"sales": sales, "ranges": ids[i:i + 6]}, tmp_path)
+    assert out["richest"] < sfb16.budget
+    for row in out["ranges"]:
+        assert row["high"] <= out["richest"]
+
+
+def test_the_tail_of_the_board_is_minimum_bid_territory(app, py_board, tmp_path):
+    # The last of the pool the app actually bakes in, not of the whole board.
+    ids = [v.player.player_id for v in py_board.top(280)[-6:]]
+    out = run_js(app, {"ranges": ids}, tmp_path)
+    for row in out["ranges"]:
+        assert row["atMinimum"] is True
+        assert "Minimum-bid" in row["verdict"]

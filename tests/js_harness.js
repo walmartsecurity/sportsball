@@ -22,6 +22,7 @@ const engine = new Function(script + `
            setTeamEdit: (t, f, v) => { (teamEdits[t] = teamEdits[t] || {})[f] = v; },
            applyToEdit, load, seedState, SEED,
            setRoomBid, suggestions, startableLeft, qbJobsLeft, roomPricing,
+           bidRange, bidRanges, rangeVerdict, roomScatter, positionHabit, richestBid,
            dollarsPerPoint, inflation, recordSale: (id,pr,t)=>{ sales.push({id,price:pr,team:t}); },
            setDPP: () => { DPP = dollarsPerPoint(); },
            nowPrice, nowIsLive, unsell, sales: () => sales, roomBids: () => roomBids,
@@ -97,6 +98,21 @@ if (req.lineup) {
   out.starters = r.slots.filter(s => s.p).map(s => s.p.id);
 }
 out.maxBids = (req.maxBids || []).map(id => engine.maxBid(engine.P.get(id)));
+if (req.ranges) {
+  const scan = engine.bidRanges(req.ranges.map(id => engine.P.get(id)));
+  out.scatter = engine.roomScatter();
+  out.richest = engine.richestBid();
+  out.ranges = req.ranges.map(id => {
+    const r = scan.get(id);
+    return { id, low: r.low, likely: r.likely, high: r.high, max: r.max,
+             atMinimum: r.atMinimum, pricedOut: r.pricedOut,
+             shouldWin: r.shouldWin, verdict: engine.rangeVerdict(r),
+             // One at a time has to agree with the whole-board scan.
+             alone: engine.bidRange(engine.P.get(id)) };
+  });
+}
+out.habits = Object.fromEntries(
+  (req.habits || []).map(pos => [pos, engine.positionHabit(pos)]));
 if (req.suggest) {
   out.suggestions = engine.suggestions(req.suggest).map(r => ({
     id: r.p.id, pos: r.p.pos, price: r.price, max: r.mb, edge: r.edge,

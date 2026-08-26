@@ -109,16 +109,30 @@ player at his rank has historically scored, leaving the ranking untouched:
 python tools/project_from_nflverse.py --calibrate-spread --out projections.csv
 ```
 
+The rank is his rank **within his own position**, against that position's own
+history. Doing it on one pooled ranking was wrong in two ways at once:
+
+- **Positions do not share a shape.** The fall from the best quarterback to the
+  tenth is nothing like the fall from the best running back to the tenth. A
+  pooled curve imposes the blend of those shapes on all of them, flattening the
+  steep positions and steepening the flat ones.
+- **A pooled curve cannot correct a position's level**, because it never
+  compares a position against itself. A tight end ranked 40th overall is handed
+  the 40th best score from a list that is mostly wide receivers — so whatever
+  the model believes tight ends are worth passes straight through the
+  correction untouched.
+
+Both land directly on replacement level, which is computed per position, and
+so on every dollar figure downstream. The run reports one line per position —
+where its top projection started and where the curve put it, and how many
+players were mapped onto how many ranks of history — so the size of the
+correction is visible rather than assumed. A position the history has nothing
+for is left on the model's own scale and says so out loud, rather than being
+quietly left behind while its rivals move.
+
 It moves less than the point gap suggests, because normalising to a fixed
 budget absorbs most of a proportional squeeze — the top of the board rises
-about 10–15% and the middle gives back about 10%:
-
-| player | default | calibrated |
-|---|---|---|
-| Puka Nacua | $356 | **$406** (+14%) |
-| Jaxon Smith-Njigba | $295 | $333 (+13%) |
-| Bijan Robinson | $285 | $310 (+9%) |
-| Brock Bowers | $206 | $187 (−9%) |
+roughly 10–15% and the middle gives some back.
 
 It is opt-in because the trade is real: this makes individual projections
 *worse* by squared error, since it predicts a 720-point season for whoever
@@ -641,6 +655,63 @@ Before the draft, with a full budget and an untouched board, max bid tracks
 list value closely — that is what list value means, and the test suite pins it.
 The two diverge as the auction goes on, which is the entire point.
 
+## What he will actually go for
+
+Your max bid is a number about *you*. It says nothing about whether you will
+ever get the chance to pay it. So every player also carries a range — what he
+costs if the room lets him slide, what he ought to go for, and what he costs
+when two teams want him:
+
+```
+[$565 / 18 slots] > max loveland
+Colston Loveland (TE) -- 641 projected pts
+  list value   $228
+  market now   $285
+  goes for     $145-$287  (likely $211)
+  YOUR MAX BID $285
+  (hard cap $548 with 18 slots to fill)
+  Winnable — you can pay the $211 he ought to go for, up to $285, but not a war.
+```
+
+Read against your own number, the range answers the question the model alone
+cannot. Your max above the high end and he should be yours, with nothing to
+lose but the overpay. Your max below the low end and he is not yours at any
+price the room will accept — watching that bidding is a waste of the one thing
+you cannot get back mid-draft, which is attention.
+
+**The width comes from two places.** How uncertain *this player* is comes free
+from the ceiling model: a receiver whose points come from explosive plays draws
+a wider spread of opinion than one with the same projection built out of
+volume, and that is exactly the spread `season_sigma` already measures. It is
+scaled against the typical drafted player, so an ordinary player gets the
+ordinary width and the tilt is genuinely about him.
+
+How loose *this room* is gets measured, not assumed. Each completed sale is run
+backwards through the pricing identity — the price paid implies a value over
+replacement, which implies a season — and the scatter of those against the
+projections is how far this room's opinion sits from the model's. A stated
+prior carries it until there are enough sales to say. Measuring in points
+rather than dollars matters: measured in dollars and applied to points, the
+same wobble would be magnified a second time on the way back out.
+
+The dollar width then falls out of the identity rather than being applied to
+the price. Dollars track value over replacement, so a proportional wobble in
+points is worth real money at the top of the board and almost nothing at the
+bottom — which is why the tail of the board reads `$1` rather than a range. It
+is not the model giving up. Below the point where value over replacement is
+worth anything, what a player fetches is decided by whose turn it is to throw a
+dollar.
+
+**Two facts about the room override all of it.** A price needs somebody able to
+pay it, so nothing sells above the largest bid any single team can still
+afford — late in a draft, with the wallets empty, that ceiling binds long
+before the model's number does. And a player already under the hammer will not
+go backwards from the bid standing on him.
+
+The room's positional habit shifts the range as well as the price. The example
+above is a room that has been paying 35% of model value for tight ends across
+four sales; that is why a $285 market price comes with a $211 likely sale.
+
 ## Roster optimization
 
 Choosing a roster is a bilevel problem: bench players score nothing, so what
@@ -685,6 +756,10 @@ Four things it does that a cheat sheet cannot:
   them is. A corrected team keeps updating as it buys.
 - **Replan the target roster** against all of the above, then tell you your
   walk-away price on anyone.
+- **Show what each player will go for**, low to high, beside your own max, so
+  the board says at a glance who is out of reach and who should be yours. Green
+  means your number clears the top of the range; red means it does not reach
+  the bottom.
 
 ```
 python tools/build_app.py --projections mine.csv --out app.html
@@ -735,7 +810,10 @@ sportsball draft --me "my team"
 me <player> <price>        you won the bid
 sold <player> <price> <tm> someone else won the bid
 undo                       take back the last sale
-max <player>               your true walk-away price
+max <player>               his price range, and your true walk-away
+block <player> <price>     record the bid standing on him right now
+block <player> off         he is no longer under the hammer
+targets [n]                what is worth bidding on, and why
 best [pos] [n]             best remaining values at current prices
 plan                       best roster you can still finish
 roster [team]              show a roster (default: yours)
@@ -809,6 +887,13 @@ Stated plainly, because a tool that hides its assumptions is worse than no tool:
 5. **Teams and depth charts move.** The bundled set was built from the rosters
    and depth charts published on the day it was generated. Regenerate before
    drafting.
+6. **The bid range starts on a prior, not on evidence.** Before the first sale
+   its width is a stated guess at how far a room's opinion drifts from a
+   projection, and only the sales in front of it turn that into a measurement.
+   Early in a draft the low and the high are a sense of scale, not a forecast;
+   by the third hour they are worth something. The positional habit inside it
+   is measured from as few as three sales, deliberately shrunk toward paying
+   list for exactly that reason.
 
 ## Development
 

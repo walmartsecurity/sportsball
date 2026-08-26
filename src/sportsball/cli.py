@@ -265,7 +265,9 @@ Commands (player names accept any unambiguous prefix):
   sold <player> <price> <tm> someone else won the bid
   undo                       take back the last sale
   targets [n]                what is worth bidding on, and why
-  max <player>               your true walk-away price
+  max <player>               his likely price range, and your walk-away
+  block <player> <price>     record the bid standing on him right now
+  block <player> off         he is no longer under the hammer
   best [pos] [n]             best remaining values at current prices
   plan                       best roster you can still finish
   roster [team]              show a roster (default: yours)
@@ -346,6 +348,8 @@ def cmd_draft(args: argparse.Namespace) -> int:
                 _do_targets(state, rest)
             elif command == "max":
                 _do_max(state, rest)
+            elif command == "block":
+                _do_block(state, rest)
             elif command == "best":
                 _do_best(state, rest)
             elif command == "plan":
@@ -434,14 +438,18 @@ def _do_targets(state: DraftState, rest: Sequence[str]) -> None:
         ) + " of model value")
 
     if rows:
+        spans = {r.player.player_id: r.span for r in
+                 state.bid_ranges(board, players=[r.player for r in rows])}
         table = [[
             ("* " if r.urgent else "") + r.name,
             r.position,
             _money(r.price),
+            spans.get(r.player.player_id, "-"),
             _money(r.max_bid),
             "; ".join(r.reasons),
         ] for r in rows]
-        print(_table(table, ["PLAYER", "POS", "NOW", "YOUR MAX", "WHY"]))
+        print(_table(table, ["PLAYER", "POS", "NOW", "GOES FOR",
+                             "YOUR MAX", "WHY"]))
     print(state.pacing(any_edge=any(r.edge > 0 for r in rows)))
 
 
@@ -457,9 +465,47 @@ def _do_max(state: DraftState, rest: Sequence[str]) -> None:
     if listed:
         print(f"  list value   {_money(listed.value)}")
         print(f"  market now   {_money(listed.price)}")
-    print(f"  YOUR MAX BID {_money(state.max_bid_for(player, board))}")
+    # The exact walk-away, not the closed form: this is one player, and the
+    # answer is about to be acted on.
+    row = state.bid_range(player, board, exact=True)
+    if row is not None:
+        print(f"  goes for     {row.span}"
+              + ("" if row.at_minimum else f"  (likely {_money(row.likely)})"))
+        print(f"  YOUR MAX BID {_money(row.max_bid)}")
+    else:
+        print(f"  YOUR MAX BID {_money(state.max_bid_for(player, board))}")
     print(f"  (hard cap {_money(state.max_affordable_bid())} "
           f"with {state.my_open_slots} slots to fill)")
+    if row is not None:
+        print(f"  {row.verdict()}")
+
+
+def _do_block(state: DraftState, rest: Sequence[str]) -> None:
+    """Record, or clear, the bid standing on a player right now.
+
+    A player under the hammer is emphatically not sold -- he is still gettable,
+    and the standing bid is the best estimate of what it will take, so it
+    floors his range instead of ending it.
+    """
+    if len(rest) < 2:
+        raise DraftError("need a player and a price, or 'off'")
+    player = state.find(" ".join(rest[:-1]))
+    token = rest[-1].lower()
+    if token in ("off", "clear", "none"):
+        if state.open_bids.pop(player.player_id, None) is None:
+            raise DraftError(f"{player.name} had no standing bid")
+        print(f"{player.name} is off the block")
+        return
+    if not _is_number(token):
+        raise DraftError(f"{token!r} is not a price")
+    price = float(token.lstrip("$"))
+    if price < state.league.min_bid:
+        raise DraftError(f"{price:g} is below the {state.league.min_bid} minimum bid")
+    state.open_bids[player.player_id] = price
+    row = state.bid_range(player)
+    print(f"{player.name} on the block at {_money(price)}"
+          + (f" -- goes for {row.span}, your max {_money(row.max_bid)}"
+             if row is not None else ""))
 
 
 def _do_best(state: DraftState, rest: Sequence[str]) -> None:
@@ -472,7 +518,14 @@ def _do_best(state: DraftState, rest: Sequence[str]) -> None:
             position = token.upper()
     board = state.board()
     pool = board.top(limit, position=position)
-    print(_table(_value_rows(pool, show_price=True), _value_headers(True)))
+    ranges = {r.player.player_id: r for r in
+              state.bid_ranges(board, players=[v.player for v in pool])}
+    rows = _value_rows(pool, show_price=True)
+    for row, v in zip(rows, pool):
+        found = ranges.get(v.player.player_id)
+        row.append(found.span if found else "-")
+        row.append(_money(found.max_bid) if found else "-")
+    print(_table(rows, _value_headers(True) + ["GOES FOR", "YOUR MAX"]))
 
 
 def _do_plan(state: DraftState) -> None:
