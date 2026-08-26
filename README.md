@@ -183,15 +183,31 @@ The published app is static: the board and the draft state are baked in when
 it is built. That is right for something you open on a phone at a table, and
 wrong for a draft that is moving, where every sale would mean a rebuild.
 
-`sportsball serve` closes the loop. It serves the app from your machine and
-polls MFL behind it, so sales and franchise budgets arrive on their own. From
-a clean checkout:
+`sportsball serve` closes the loop. It serves the app **from your own machine**
+and polls MFL behind it, so sales and franchise budgets arrive on their own.
+This has to run somewhere that can reach both your league and your browser,
+which means your laptop -- not a cloud shell, and not the published artifact.
+
+From a clean checkout, one command sets up and starts everything:
 
 ```
+./draft.sh --league 36570 --host www43 --me "Your Franchise"
+```
+
+It creates a virtualenv, installs, rebuilds the board, and starts the server;
+re-running reuses the virtualenv. Anything you pass goes through to `serve`.
+The long way, if you would rather see the steps:
+
+```
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[solver]'
 python tools/build_app.py --out app.html
 sportsball serve --league 36570 --host www43 --me "Your Franchise"
 ```
+
+On Windows, use the second form from PowerShell with
+`.venv\Scripts\Activate.ps1`; `draft.sh` needs bash, so it wants WSL or Git
+Bash.
 
 Open the address it prints. A dot in the header shows how fresh the sync is,
 and goes amber when the league data is older than three sync cycles.
